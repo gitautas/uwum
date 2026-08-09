@@ -26,6 +26,8 @@ and voice calls over MatrixRTC.
   media paths.
 - [DESIGN.md](DESIGN.md) — the visual spec: tokens, voice, motion, and the rules
   the UI is meant to hold to.
+- [PLAN.md](PLAN.md) — features researched but not built: custom emoji and
+  stickers, room backgrounds, profile fields. Event shapes and traps included.
 
 ---
 
