@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Track } from "livekit-client";
 
 import { call, screenShareSupported, type CallParticipantView } from "../lib/call";
@@ -21,6 +22,16 @@ export function CallStage({ roomId }: { roomId: string }) {
   const showBanner = useStore((s) => s.showBanner);
   const [fullscreen, setFullscreen] = useState(false);
 
+  // Escape is what everyone reaches for to get out of a fullscreen video.
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
+
   // Only draw for the room being looked at; a call elsewhere shows as the
   // compact bar instead.
   if (state.roomId !== roomId || state.status === "idle") return null;
@@ -40,7 +51,7 @@ export function CallStage({ roomId }: { roomId: string }) {
     }
   }
 
-  return (
+  const stage = (
     <div
       style={{
         position: fullscreen ? "fixed" : "relative",
@@ -175,6 +186,14 @@ export function CallStage({ roomId }: { roomId: string }) {
       </div>
     </div>
   );
+
+  // Fullscreen has to leave the layout entirely, not just raise its z-index.
+  // This lives inside ChatPane, which sets `position: relative` and a z-index —
+  // that makes a stacking context, so a z-index here can only compete with
+  // ChatPane's own children. The room info panel is a *sibling* of ChatPane and
+  // comes after it in the DOM, so it would paint over the top however high we
+  // set the number. A portal sidesteps the whole question.
+  return fullscreen ? createPortal(stage, document.body) : stage;
 }
 
 /**
