@@ -1,0 +1,71 @@
+[package]
+name = "uwum"
+version = "0.1.0"
+description = "a cute matrix client"
+authors = ["uwum"]
+edition = "2024"
+rust-version = "1.93"
+
+[lib]
+# The `_lib` suffix keeps the lib name distinct from the bin name on Windows.
+# See https://github.com/rust-lang/cargo/issues/8519
+name = "uwum_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+
+matrix-sdk = { version = "0.18", default-features = false, features = [
+  "e2e-encryption",
+  "automatic-room-key-forwarding",
+  "sqlite",
+  "bundled-sqlite",
+  "markdown",
+  "sso-login",
+  "qrcode",
+] }
+# Timeline aggregation (edits/reactions/replies), sliding-sync room list, and
+# spaces — the same layer Element X is built on.
+matrix-sdk-ui = { version = "0.18", default-features = false }
+# For the few base types matrix-sdk doesn't re-export (LatestEventValue).
+matrix-sdk-base = { version = "0.18", default-features = false }
+# `ruma` and `eyeball_im` come from the SDK's own re-exports (matrix_sdk::ruma,
+# matrix_sdk_ui::eyeball_im) so their versions can never drift out of sync.
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "fs"] }
+tokio-stream = "0.1"
+futures-util = "0.3"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# `v1` (the default) picks the right native store per platform: Keychain on
+# macOS, Credential Manager on Windows, Secret Service on *nix.
+keyring = "4"
+rand = "0.9"
+url = "2"
+mime = "0.3"
+mime_guess = "2"
+uuid = { version = "1", features = ["v4"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+tauri-plugin-dialog = "2.7.2"
+
+[features]
+# Enabled by the Tauri CLI for production builds. DO NOT REMOVE.
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
