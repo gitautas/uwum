@@ -1,0 +1,232 @@
+import { useShallow } from "zustand/react/shallow";
+
+import { accentFor, initialsFor } from "../lib/display";
+import { mediaUrl } from "../lib/ipc";
+import { useStore } from "../store";
+import { Avatar, Icon, PresenceDot } from "./ui";
+
+/**
+ * The narrow left rail: the uwu mark, one tile per space, and your own avatar
+ * pinned to the bottom.
+ */
+export function SpacesRail() {
+  const { spaces, activeSpaceId, session, setActiveSpace, openSettings } = useStore(
+    useShallow((s) => ({
+      spaces: s.spaces,
+      activeSpaceId: s.activeSpaceId,
+      session: s.session,
+      setActiveSpace: s.setActiveSpace,
+      openSettings: s.openSettings,
+    })),
+  );
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        zIndex: 1,
+        width: 76,
+        flex: "none",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 14,
+        // The window has no title bar, so the top of this rail sits under the
+        // macOS traffic lights; leave them room.
+        padding: "44px 0 16px",
+        borderRight: "1px solid var(--border-subtle)",
+        background: "var(--ink-900)",
+      }}
+    >
+      <div
+        className="uwu-drag"
+        style={{ position: "absolute", top: 0, left: 0, right: 0, height: 40 }}
+      />
+
+      <div
+        style={{
+          fontFamily: "var(--font-display)",
+          fontWeight: 800,
+          fontSize: 15,
+          color: "var(--accent-secondary)",
+          letterSpacing: "-0.02em",
+          lineHeight: 1,
+        }}
+      >
+        uwu
+      </div>
+      <div
+        style={{
+          width: 26,
+          height: 2,
+          background: "var(--border-default)",
+          borderRadius: 999,
+        }}
+      />
+
+      <SpaceTile
+        label="all"
+        name="everything"
+        active={activeSpaceId === null}
+        accent="var(--accent-primary)"
+        onClick={() => setActiveSpace(null)}
+      />
+
+      <div
+        className="uwu-scroll"
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+          flex: 1,
+          minHeight: 0,
+          width: "100%",
+          scrollbarWidth: "none",
+        }}
+      >
+        {spaces.map((space) => (
+          <SpaceTile
+            key={space.id}
+            label={initialsFor(space.name)}
+            name={space.name}
+            mxc={space.avatarUrl}
+            badge={space.notificationCount}
+            active={activeSpaceId === space.id}
+            accent={accentFor(space.id)}
+            onClick={() => setActiveSpace(space.id)}
+          />
+        ))}
+      </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <button
+          onClick={openSettings}
+          title="settings"
+          style={{ cursor: "pointer", display: "flex" }}
+        >
+          <Icon name="gear" size={20} color="var(--text-tertiary)" />
+        </button>
+        <div style={{ position: "relative" }}>
+          {session && (
+            <Avatar
+              id={session.userId}
+              name={session.displayName ?? session.userId}
+              mxc={session.avatarUrl}
+              size={38}
+              radius={14}
+            />
+          )}
+          <PresenceDot />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SpaceTile({
+  label,
+  name,
+  mxc,
+  badge,
+  active,
+  accent,
+  onClick,
+}: {
+  label: string;
+  name: string;
+  mxc?: string | null;
+  badge?: number;
+  active: boolean;
+  accent: string;
+  onClick: () => void;
+}) {
+  const src = mediaUrl(mxc, { width: 46, height: 46 });
+
+  return (
+    <div style={{ position: "relative", flex: "none" }}>
+      <button
+        onClick={onClick}
+        title={name}
+        style={{
+          width: 46,
+          height: 46,
+          borderRadius: 16,
+          cursor: "pointer",
+          fontFamily: "var(--font-rave)",
+          fontSize: 13,
+          fontWeight: 800,
+          letterSpacing: "0.02em",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          overflow: "hidden",
+          padding: 0,
+          transition: "all var(--dur-fast) var(--ease-bounce)",
+          ...(active
+            ? {
+                background: src ? "transparent" : accent,
+                color: "var(--text-on-accent)",
+                border: "2px solid var(--ink-950)",
+                boxShadow: "var(--shadow-sticker-ink)",
+                transform: "rotate(-3deg)",
+              }
+            : {
+                background: "var(--surface-card-raised)",
+                color: "var(--text-secondary)",
+                border: "1px solid var(--border-subtle)",
+              }),
+        }}
+        onMouseEnter={(e) => {
+          if (!active) e.currentTarget.style.transform = "translateY(-2px) rotate(-3deg)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = active ? "rotate(-3deg)" : "";
+        }}
+      >
+        {src ? (
+          <img
+            src={src}
+            alt=""
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            draggable={false}
+          />
+        ) : (
+          label.toUpperCase()
+        )}
+      </button>
+
+      {!!badge && badge > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            top: -4,
+            right: -4,
+            minWidth: 18,
+            height: 18,
+            padding: "0 5px",
+            borderRadius: 999,
+            background: "var(--accent-secondary)",
+            color: "var(--text-on-accent)",
+            border: "2px solid var(--ink-900)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily: "var(--font-rave)",
+            fontSize: 9,
+            fontWeight: 800,
+          }}
+        >
+          {badge > 99 ? "99+" : badge}
+        </span>
+      )}
+    </div>
+  );
+}
