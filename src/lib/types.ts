@@ -106,6 +106,13 @@ export interface NewRoomResult {
   spaceWarning: string | null;
 }
 
+/** What this account may change about a room. */
+export interface RoomPermissions {
+  canRename: boolean;
+  canSetTopic: boolean;
+  canInvite: boolean;
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;

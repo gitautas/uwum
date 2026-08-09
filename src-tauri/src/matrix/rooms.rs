@@ -539,13 +539,24 @@ pub async fn create(core: &MatrixCore, new: NewRoom) -> Result<NewRoomResult> {
     Ok(NewRoomResult { room_id: room_id.to_string(), space_warning })
 }
 
-/// Record a room as a child of a space.
+/// Record a room as a child of a space, from both ends.
 ///
-/// Best-effort by design: adding the child is a state event in the *space*, and
-/// plenty of spaces are someone else's. A room that exists but isn't filed is a
-/// far better outcome than a failed creation.
+/// Membership of a space is written twice and neither half is reliable alone —
+/// the trap in ARCHITECTURE.md. The space's `m.space.child` is the half other
+/// clients read, but it's a state event in the *space*, which is frequently
+/// someone else's; the room's own `m.space.parent` is one we can always write,
+/// because we just created the room and hold every power in it.
+///
+/// Writing both is also what makes a new room appear under its space *now*: the
+/// room summary carries `parent_spaces`, which arrives with the room's own
+/// diff, while the space's children list is only re-read on a slow poll.
+///
+/// Best-effort by design. A room that exists but isn't filed is a far better
+/// outcome than a failed creation.
 async fn add_to_space(core: &MatrixCore, space_id: &str, child: &RoomId) -> Result<()> {
-    use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
+    use matrix_sdk::ruma::events::space::{
+        child::SpaceChildEventContent, parent::SpaceParentEventContent,
+    };
 
     let space_id = RoomId::parse(space_id)?;
     let space = core
@@ -553,12 +564,79 @@ async fn add_to_space(core: &MatrixCore, space_id: &str, child: &RoomId) -> Resu
         .get_room(&space_id)
         .ok_or_else(|| Error::UnknownRoom(space_id.to_string()))?;
 
-    // `via` is where someone should try to join the child; the server that just
-    // created it is the only one that certainly has it.
-    let via = vec![core.own_user_id()?.server_name().to_owned()];
-    space.send_state_event_for_key(child, SpaceChildEventContent::new(via)).await?;
+    // `via` is where someone should try to join; the server that just created
+    // the room is the only one that certainly has it.
+    let server = core.own_user_id()?.server_name().to_owned();
+
+    // The child's side first: it always succeeds, so the room is where the user
+    // expects it even when the space rejects us.
+    if let Some(room) = core.client.get_room(child) {
+        let mut parent = SpaceParentEventContent::new(vec![server.clone()]);
+        parent.canonical = true;
+        if let Err(e) = room.send_state_event_for_key(&space_id, parent).await {
+            tracing::warn!("couldn't record the space as this room's parent: {e}");
+        }
+    }
+
+    space.send_state_event_for_key(child, SpaceChildEventContent::new(vec![server])).await?;
 
     Ok(())
+}
+
+/// Rename a room and/or change its topic. `None` leaves a field alone.
+pub async fn update(
+    core: &MatrixCore,
+    room_id: &RoomId,
+    name: Option<String>,
+    topic: Option<String>,
+) -> Result<()> {
+    let room = core.room(&room_id.to_owned())?;
+
+    if let Some(name) = name {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(Error::Other("a room needs a name~".into()));
+        }
+        room.set_name(name).await?;
+    }
+
+    // An empty topic is a real value: it's how you clear one.
+    if let Some(topic) = topic {
+        room.set_room_topic(topic.trim()).await?;
+    }
+
+    Ok(())
+}
+
+/// What this account is allowed to change about a room.
+///
+/// Read once when the room panel opens rather than carried on every summary:
+/// it needs the power-level state event, and the answer only matters for the
+/// room you're looking at.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPermissions {
+    pub can_rename: bool,
+    pub can_set_topic: bool,
+    pub can_invite: bool,
+}
+
+pub async fn permissions(core: &MatrixCore, room_id: &RoomId) -> Result<RoomPermissions> {
+    use matrix_sdk::ruma::events::StateEventType;
+
+    let room = core.room(&room_id.to_owned())?;
+    let user_id = core.own_user_id()?;
+
+    // `_or_default` rather than a hard error: a room whose power levels we
+    // can't read yet should let the user try and let the server be the
+    // authority, not refuse on a guess.
+    let levels = room.power_levels_or_default().await;
+
+    Ok(RoomPermissions {
+        can_rename: levels.user_can_send_state(&user_id, StateEventType::RoomName),
+        can_set_topic: levels.user_can_send_state(&user_id, StateEventType::RoomTopic),
+        can_invite: levels.user_can_invite(&user_id),
+    })
 }
 
 pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
@@ -567,8 +645,19 @@ pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
     Ok(room.room_id().to_string())
 }
 
-pub async fn leave(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
-    core.room(&room_id.to_owned())?.leave().await?;
+/// Leave a room, and optionally forget it.
+///
+/// Matrix has no delete. Forgetting drops the room from your account entirely —
+/// it stops being listed, and its history is no longer yours to read even if
+/// you're invited back. For a room only you were in, that is as close to
+/// deletion as the protocol gets; for any other room, everyone else's copy
+/// carries on without you. The UI says which of those is happening.
+pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<()> {
+    let room = core.room(&room_id.to_owned())?;
+    room.leave().await?;
+    if forget {
+        room.forget().await?;
+    }
     Ok(())
 }
 

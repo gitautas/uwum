@@ -20,6 +20,7 @@ import type {
   NewRoomResult,
   RecoveryStatus,
   RoomMember,
+  RoomPermissions,
   RoomSummary,
   SasStateInfo,
   SendOptions,
@@ -91,7 +92,20 @@ export const createRoom = (room: NewRoom) =>
 export const joinRoom = (aliasOrId: string) =>
   invoke<string>("join_room", { aliasOrId });
 
-export const leaveRoom = (roomId: string) => invoke<void>("leave_room", { roomId });
+/** Leave a room. `forget` also drops it from the account entirely. */
+export const leaveRoom = (roomId: string, forget = false) =>
+  invoke<void>("leave_room", { roomId, forget });
+
+/** Rename a room or change its topic. Omitted fields are left alone. */
+export const updateRoom = (roomId: string, patch: { name?: string; topic?: string }) =>
+  invoke<void>("update_room", {
+    roomId,
+    name: patch.name ?? null,
+    topic: patch.topic ?? null,
+  });
+
+export const getRoomPermissions = (roomId: string) =>
+  invoke<RoomPermissions>("get_room_permissions", { roomId });
 
 export const inviteUser = (roomId: string, userId: string) =>
   invoke<void>("invite_user", { roomId, userId });

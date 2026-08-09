@@ -102,6 +102,8 @@ interface Actions {
   setBootstrapped(v: boolean): void;
   applyRoomDiffs(diffs: Diff<RoomSummary>[]): void;
   setSpaces(spaces: SpaceSummary[]): void;
+  /** Re-read the spaces now rather than waiting for the slow poll. */
+  refreshSpaces(): Promise<void>;
   setActiveSpace(id: string | null): void;
   selectRoom(roomId: string | null): Promise<void>;
   openThread(threadRoot: string | null): Promise<void>;
@@ -175,6 +177,14 @@ export const useStore = create<State & Actions>((set, get) => ({
   applyRoomDiffs: (diffs) => set((s) => ({ rooms: applyDiffs(s.rooms, diffs) })),
 
   setSpaces: (spaces) => set({ spaces }),
+
+  refreshSpaces: async () => {
+    try {
+      set({ spaces: await ipc.getSpaces() });
+    } catch {
+      // The poll will come round again; nothing here is worth a banner.
+    }
+  },
 
   setActiveSpace: (activeSpaceId) => set({ activeSpaceId }),
 

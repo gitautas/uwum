@@ -5,6 +5,7 @@ import * as ipc from "../lib/ipc";
 import type { RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
+import { RoomSettings } from "./RoomSettings";
 import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
 
 export function RoomInfo({ room }: { room: RoomSummary }) {
@@ -146,6 +147,8 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
           onToggle={(next) => void ipc.setRoomLowPriority(room.id, next).catch(() => {})}
         />
       </div>
+
+      <RoomSettings room={room} />
     </div>
   );
 }

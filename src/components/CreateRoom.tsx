@@ -24,6 +24,7 @@ function Dialog() {
   const close = useStore((s) => s.closeCreateRoom);
   const selectRoom = useStore((s) => s.selectRoom);
   const showBanner = useStore((s) => s.showBanner);
+  const refreshSpaces = useStore((s) => s.refreshSpaces);
   const activeSpaceId = useStore((s) => s.activeSpaceId);
   const space = useStore((s) => s.spaces.find((sp) => sp.id === s.activeSpaceId));
 
@@ -65,6 +66,11 @@ function Dialog() {
 
       close();
       if (result.spaceWarning) showBanner("error", result.spaceWarning);
+
+      // The space's children list is only re-read on a slow poll, and the
+      // sidebar filters on it. Ask for it now so the room is where the user
+      // just put it.
+      if (addToSpace && activeSpaceId) void refreshSpaces();
 
       // The room arrives through the sliding-sync diff like any other, and
       // opening a timeline for a room the room list hasn't heard of yet fails.
