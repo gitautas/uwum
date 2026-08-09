@@ -127,6 +127,10 @@ pub async fn login_password(
     username: &str,
     password: &str,
 ) -> Result<SessionInfo> {
+    // Serialised against restore and against a second click; building two
+    // sessions on one store is what `session_gate` exists to prevent.
+    let _gate = state.session_gate.lock().await;
+
     // Log in against a store-less client first: we can't name the store
     // directory until we know the user ID, and we don't want to create a store
     // for credentials that turn out to be wrong.
@@ -154,6 +158,10 @@ pub async fn login_sso(
     server: &str,
     provider_id: Option<String>,
 ) -> Result<SessionInfo> {
+    // Serialised against restore and against a second click; building two
+    // sessions on one store is what `session_gate` exists to prevent.
+    let _gate = state.session_gate.lock().await;
+
     use tauri_plugin_opener::OpenerExt;
 
     let probe = probe_client(server).await?;
@@ -217,6 +225,12 @@ pub async fn restore(
     state: &AppState,
     data_dir: &Path,
 ) -> Result<Option<SessionInfo>> {
+    // One restore at a time, and never a second session on top of a live one.
+    let _gate = state.session_gate.lock().await;
+    if let Some(existing) = state.core.read().await.clone() {
+        return Ok(Some(existing.session_info().await?));
+    }
+
     let Some(restored) = session::load(data_dir)? else {
         return Ok(None);
     };

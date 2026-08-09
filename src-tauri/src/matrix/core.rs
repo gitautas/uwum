@@ -121,6 +121,18 @@ impl MatrixCore {
 #[derive(Default)]
 pub struct AppState {
     pub core: RwLock<Option<Arc<MatrixCore>>>,
+    /// Held for the whole of a sign-in or restore.
+    ///
+    /// Building a session is not idempotent — it constructs a `Client` and
+    /// starts sync, an event cache and a send queue against the SQLite store —
+    /// and two of those on one store is a genuinely bad time: doubled traffic,
+    /// doubled logs, `FOREIGN KEY constraint failed` from two writers, and a
+    /// room one client forgets being written straight back by the other.
+    ///
+    /// Two calls arriving together is not hypothetical. React's StrictMode runs
+    /// effects twice in development, so the restore on mount fires twice, and
+    /// nothing in an IPC command stops a caller asking twice anyway.
+    pub session_gate: Mutex<()>,
 }
 
 impl AppState {
