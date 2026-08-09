@@ -11,6 +11,8 @@ export interface Settings {
   audioInput: string;
   /** `deviceId` of the speaker, or "" for the system default. */
   audioOutput: string;
+  /** `deviceId` of the camera, or "" for the system default. */
+  videoInput: string;
   /** Overrides the LiveKit SFU discovered from `.well-known`. */
   livekitUrl: string;
   /** Send on Enter (Discord-style) vs. Cmd+Enter. */
@@ -23,6 +25,7 @@ export const DEFAULTS: Settings = {
   accent: "acid",
   audioInput: "",
   audioOutput: "",
+  videoInput: "",
   livekitUrl: "",
   sendOnEnter: true,
   showInfoPanel: true,
@@ -88,22 +91,28 @@ export interface AudioDevice {
 }
 
 /**
- * List the microphones and speakers we're allowed to see.
+ * List the microphones, speakers and cameras we're allowed to see.
  *
- * Labels are blank until the user has granted microphone access at least once,
- * so this asks for permission first — otherwise the picker shows a list of
- * anonymous "Device 1", "Device 2" entries that nobody can choose between.
+ * Labels are blank until the user has granted access at least once, so this
+ * asks for permission first — otherwise the picker shows a list of anonymous
+ * "Device 1", "Device 2" entries that nobody can choose between.
+ *
+ * Camera permission is requested separately from the microphone: asking for
+ * both at once means a refusal of either loses both sets of labels.
  */
-export async function listAudioDevices(): Promise<{
+export async function listMediaDevices(): Promise<{
   inputs: AudioDevice[];
   outputs: AudioDevice[];
+  cameras: AudioDevice[];
 }> {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    // We only wanted the permission, not the audio.
-    stream.getTracks().forEach((track) => track.stop());
-  } catch {
-    // Denied or no microphone — we can still list outputs, just without labels.
+  for (const constraint of [{ audio: true }, { video: true }]) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraint);
+      // We only wanted the permission, not the media.
+      stream.getTracks().forEach((track) => track.stop());
+    } catch {
+      // Denied or absent — we can still enumerate, just without labels.
+    }
   }
 
   const devices = await navigator.mediaDevices.enumerateDevices();
@@ -118,5 +127,6 @@ export async function listAudioDevices(): Promise<{
   return {
     inputs: pick("audioinput", "microphone"),
     outputs: pick("audiooutput", "speaker"),
+    cameras: pick("videoinput", "camera"),
   };
 }

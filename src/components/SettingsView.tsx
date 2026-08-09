@@ -5,7 +5,7 @@ import { call } from "../lib/call";
 import * as ipc from "../lib/ipc";
 import {
   ACCENT_SWATCHES,
-  listAudioDevices,
+  listMediaDevices,
   type Accent,
   type AudioDevice,
 } from "../lib/settings";
@@ -18,7 +18,7 @@ type Section = "account" | "security" | "voice" | "appearance" | "about";
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "account", label: "account", icon: "user-circle" },
   { id: "security", label: "security", icon: "shield-check" },
-  { id: "voice", label: "voice & audio", icon: "microphone" },
+  { id: "voice", label: "voice & video", icon: "microphone" },
   { id: "appearance", label: "appearance", icon: "palette" },
   { id: "about", label: "about", icon: "info" },
 ];
@@ -680,16 +680,17 @@ function VoiceSection() {
   const [devices, setDevices] = useState<{
     inputs: AudioDevice[];
     outputs: AudioDevice[];
+    cameras: AudioDevice[];
   } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    listAudioDevices()
+    listMediaDevices()
       .then((found) => {
         if (!cancelled) setDevices(found);
       })
       .catch(() => {
-        if (!cancelled) setDevices({ inputs: [], outputs: [] });
+        if (!cancelled) setDevices({ inputs: [], outputs: [], cameras: [] });
       });
     return () => {
       cancelled = true;
@@ -698,7 +699,7 @@ function VoiceSection() {
 
   return (
     <>
-      <Heading>voice & audio</Heading>
+      <Heading>voice & video</Heading>
 
       <Card>
         {!devices ? (
@@ -746,10 +747,31 @@ function VoiceSection() {
               </select>
             </Field>
 
-            {devices.inputs.length === 0 && (
+            <Field
+              label="camera"
+              hint="used when you turn video on in a call. changing this mid-call switches it live."
+            >
+              <select
+                value={settings.videoInput}
+                onChange={(e) => {
+                  updateSettings({ videoInput: e.target.value });
+                  void call.setVideoInput(e.target.value);
+                }}
+                style={inputStyle}
+              >
+                <option value="">system default</option>
+                {devices.cameras.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            {(devices.inputs.length === 0 || devices.cameras.length === 0) && (
               <div style={{ fontSize: 12.5, color: "var(--status-warning)" }}>
-                no microphones found — check that uwum has microphone permission in
-                system settings.
+                no {devices.inputs.length === 0 ? "microphones" : "cameras"} found —
+                check that uwum has permission in system settings.
               </div>
             )}
           </>

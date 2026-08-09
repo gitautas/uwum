@@ -136,7 +136,7 @@ export function TimelineView({
     }
   }
 
-  const rows = withGrouping(items);
+  const rows = withGrouping(items.filter(isWorthShowing));
 
   return (
     <div
@@ -346,6 +346,25 @@ function ReadReceipts({ items }: { items: TimelineItem[] }) {
       </span>
     </div>
   );
+}
+
+/**
+ * State events that are pure call bookkeeping.
+ *
+ * MatrixRTC republishes membership on join, leave and every periodic refresh,
+ * so a single call can produce dozens of these. They say nothing a person wants
+ * to read — the call UI already shows who's in it.
+ */
+const CALL_STATE_EVENTS = new Set([
+  "org.matrix.msc3401.call.member",
+  "m.rtc.member",
+  "m.call.member",
+]);
+
+function isWorthShowing(item: TimelineItem): boolean {
+  const content = item.event?.content;
+  if (content?.kind !== "state") return true;
+  return !CALL_STATE_EVENTS.has(content.eventType);
 }
 
 /**

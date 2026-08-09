@@ -15,11 +15,11 @@ import {
   ConnectionState,
   DisconnectReason,
   RemoteTrack,
-  RemoteTrackPublication,
   Room,
   RoomEvent,
   Track,
   type RemoteParticipant,
+  type TrackPublication,
 } from "livekit-client";
 
 import * as ipc from "./ipc";
@@ -33,12 +33,24 @@ export interface CallParticipantView {
   isMuted: boolean;
   isLocal: boolean;
   audioLevel: number;
+  /**
+   * Live tracks, handed to the UI to attach to a `<video>`.
+   *
+   * These are SDK objects rather than plain data on purpose: a video frame
+   * can't cross a serialisation boundary, so the tile attaches the track to an
+   * element directly. `null` means the camera is off or unsubscribed, which is
+   * the cue to fall back to an avatar.
+   */
+  cameraTrack: Track | null;
+  screenTrack: Track | null;
 }
 
 export interface CallState {
   roomId: string | null;
   status: "idle" | "connecting" | "connected" | "reconnecting" | "failed";
   micEnabled: boolean;
+  cameraEnabled: boolean;
+  screenShareEnabled: boolean;
   deafened: boolean;
   participants: CallParticipantView[];
   error: string | null;
@@ -48,10 +60,23 @@ export const IDLE_CALL: CallState = {
   roomId: null,
   status: "idle",
   micEnabled: true,
+  cameraEnabled: false,
+  screenShareEnabled: false,
   deafened: false,
   participants: [],
   error: null,
 };
+
+/**
+ * Whether this WebView can capture a screen at all.
+ *
+ * `getDisplayMedia` is not universally present in WKWebView, and calling it
+ * where it's missing throws rather than degrading. Feature-detect so the button
+ * can be hidden instead of offering something that can't work.
+ */
+export function screenShareSupported(): boolean {
+  return typeof navigator?.mediaDevices?.getDisplayMedia === "function";
+}
 
 type Listener = (state: CallState) => void;
 
@@ -82,7 +107,7 @@ class CallController {
     return this.state;
   }
 
-  async join(roomId: string): Promise<void> {
+  async join(roomId: string, options: { video?: boolean } = {}): Promise<void> {
     // Switching rooms mid-call should leave the old one cleanly first.
     if (this.state.roomId && this.state.roomId !== roomId) {
       await this.leave();
@@ -116,6 +141,12 @@ class CallController {
       this.outputDeviceId = settings.audioOutput;
 
       this.update({ status: "connected", micEnabled: true });
+
+      // Camera comes up after connecting, not as part of it: a refused camera
+      // permission shouldn't take the whole call down with it.
+      if (options.video) {
+        await this.setCameraEnabled(true).catch(() => {});
+      }
       this.syncParticipants();
       this.startMembershipRefresh(roomId);
     } catch (error) {
@@ -164,6 +195,41 @@ class CallController {
     );
   }
 
+  async setCameraEnabled(enabled: boolean): Promise<void> {
+    if (!this.room) return;
+    const { videoInput } = loadSettings();
+    await this.room.localParticipant.setCameraEnabled(
+      enabled,
+      enabled && videoInput ? { deviceId: { exact: videoInput } } : undefined,
+    );
+    this.update({ cameraEnabled: enabled });
+    this.syncParticipants();
+  }
+
+  async setScreenShareEnabled(enabled: boolean): Promise<void> {
+    if (!this.room) return;
+    if (enabled && !screenShareSupported()) {
+      throw new Error("this webview can't capture the screen");
+    }
+    // The picker is a user gesture the person can cancel; that throws, and a
+    // cancelled share is not an error worth surfacing.
+    try {
+      await this.room.localParticipant.setScreenShareEnabled(enabled, {
+        audio: true,
+      });
+      this.update({ screenShareEnabled: enabled });
+    } catch (error) {
+      this.update({ screenShareEnabled: false });
+      if (enabled && !isUserCancellation(error)) throw error;
+    }
+    this.syncParticipants();
+  }
+
+  async setVideoInput(deviceId: string): Promise<void> {
+    if (!this.room) return;
+    await this.room.switchActiveDevice("videoinput", deviceId || "default");
+  }
+
   async setMicEnabled(enabled: boolean): Promise<void> {
     if (!this.room) return;
     await this.room.localParticipant.setMicrophoneEnabled(enabled);
@@ -183,7 +249,11 @@ class CallController {
   private wire(room: Room) {
     room
       .on(RoomEvent.TrackSubscribed, (track: RemoteTrack) => {
-        if (track.kind !== Track.Kind.Audio) return;
+        if (track.kind !== Track.Kind.Audio) {
+          // Video is attached by the tile that renders it, not here.
+          this.syncParticipants();
+          return;
+        }
         const element = track.attach() as HTMLAudioElement;
         element.autoplay = true;
         element.muted = this.state.deafened;
@@ -199,6 +269,10 @@ class CallController {
         if (track.sid) this.audioElements.delete(track.sid);
         this.syncParticipants();
       })
+      .on(RoomEvent.LocalTrackPublished, () => this.syncParticipants())
+      .on(RoomEvent.LocalTrackUnpublished, () => this.syncParticipants())
+      .on(RoomEvent.TrackPublished, () => this.syncParticipants())
+      .on(RoomEvent.TrackUnpublished, () => this.syncParticipants())
       .on(RoomEvent.ParticipantConnected, () => this.syncParticipants())
       .on(RoomEvent.ParticipantDisconnected, () => this.syncParticipants())
       .on(RoomEvent.ActiveSpeakersChanged, () => this.syncParticipants())
@@ -227,10 +301,7 @@ class CallController {
       participant: RemoteParticipant | Room["localParticipant"],
       isLocal: boolean,
     ): CallParticipantView => {
-      const publications = [...participant.trackPublications.values()];
-      const audio = publications.find(
-        (p) => p.kind === Track.Kind.Audio,
-      ) as RemoteTrackPublication | undefined;
+      const audio = participant.getTrackPublication(Track.Source.Microphone);
 
       return {
         identity: participant.identity,
@@ -241,6 +312,10 @@ class CallController {
         isMuted: isLocal ? !this.state.micEnabled : (audio?.isMuted ?? true),
         isLocal,
         audioLevel: participant.audioLevel ?? 0,
+        cameraTrack: liveVideo(participant.getTrackPublication(Track.Source.Camera)),
+        screenTrack: liveVideo(
+          participant.getTrackPublication(Track.Source.ScreenShare),
+        ),
       };
     };
 
@@ -334,6 +409,27 @@ function describeDisconnect(reason?: DisconnectReason): string | undefined {
         "check that the sfu's udp and tcp media ports are open."
       );
   }
+}
+
+/**
+ * The playable video track behind a publication, if there is one.
+ *
+ * A remote publication only carries a track once subscribed, and a muted camera
+ * keeps its publication but stops producing frames — both cases should show an
+ * avatar rather than a frozen or black tile.
+ */
+function liveVideo(publication: TrackPublication | undefined): Track | null {
+  if (!publication || publication.isMuted) return null;
+  const track = publication.track;
+  return track && track.kind === Track.Kind.Video ? track : null;
+}
+
+/** Cancelling the screen picker rejects; that's a choice, not a failure. */
+function isUserCancellation(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "NotAllowedError" || error.name === "AbortError")
+  );
 }
 
 export function matrixUserFromIdentity(identity: string): string {

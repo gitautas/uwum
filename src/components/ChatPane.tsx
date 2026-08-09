@@ -6,6 +6,7 @@ import * as ipc from "../lib/ipc";
 import type { RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { CallBar, useCallState } from "./CallBar";
+import { CallStage } from "./CallStage";
 import { Composer } from "./Composer";
 import { TimelineView } from "./TimelineView";
 import { VerifyBanner } from "./VerificationModal";
@@ -30,7 +31,8 @@ export function ChatPane({ room }: { room: RoomSummary }) {
       if (inThisCall) {
         await call.leave();
       } else {
-        await call.join(room.id);
+        // A video room is a call you join, so bring the camera with you.
+        await call.join(room.id, { video: room.isVideoRoom });
       }
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
@@ -147,9 +149,13 @@ export function ChatPane({ room }: { room: RoomSummary }) {
         <ThreadHeader roomId={room.id} threadRoot={threadRoot} onClose={() => void openThread(null)} />
       )}
 
+      <CallStage roomId={room.id} />
+
       <TimelineView roomId={room.id} threadRoot={threadRoot ?? undefined} />
 
-      <CallBar />
+      {/* A call in some other room stays as the compact strip, so it's still
+          reachable without leaving the room you're reading. */}
+      {callState.roomId !== room.id && <CallBar />}
 
       <Composer
         roomId={room.id}
