@@ -30,17 +30,24 @@ export const DEFAULTS: Settings = {
 
 const STORAGE_KEY = "uwum:settings";
 
-/** The design's four neon accents: [base, hover, pressed]. */
+/**
+ * The design's four neon accents, as the palette tokens they come from.
+ *
+ * Each accent is the 500/400/600 step of one ramp — base, hover, pressed —
+ * which is exactly how the design system defines them. Naming the tokens rather
+ * than repeating their hex keeps `tokens/colors.css` the only place a colour is
+ * written down.
+ */
 const ACCENTS: Record<Accent, [string, string, string]> = {
-  acid: ["#C8FF4D", "#D9FF7A", "#A6E020"],
-  pink: ["#FF6187", "#FF85A2", "#E8456C"],
-  violet: ["#B14EFF", "#C97DFF", "#8F2FE0"],
-  cyan: ["#4DE8FF", "#7EEFFF", "#22C4DE"],
+  acid: ["--acid-500", "--acid-400", "--acid-600"],
+  pink: ["--pink-500", "--pink-400", "--pink-600"],
+  violet: ["--violet-500", "--violet-400", "--violet-600"],
+  cyan: ["--cyan-500", "--cyan-400", "--cyan-600"],
 };
 
 export const ACCENT_SWATCHES = Object.entries(ACCENTS).map(([name, [base]]) => ({
   name: name as Accent,
-  colour: base,
+  colour: `var(${base})`,
 }));
 
 export function load(): Settings {
@@ -68,9 +75,11 @@ export function save(settings: Settings): void {
 export function applyAccent(accent: Accent): void {
   const [base, hover, press] = ACCENTS[accent] ?? ACCENTS.acid;
   const root = document.documentElement;
-  root.style.setProperty("--accent-primary", base);
-  root.style.setProperty("--accent-primary-hover", hover);
-  root.style.setProperty("--accent-primary-press", press);
+  // A custom property can hold a `var()` reference, so the accent aliases point
+  // at palette tokens rather than carrying copies of their values.
+  root.style.setProperty("--accent-primary", `var(${base})`);
+  root.style.setProperty("--accent-primary-hover", `var(${hover})`);
+  root.style.setProperty("--accent-primary-press", `var(${press})`);
 }
 
 export interface AudioDevice {
