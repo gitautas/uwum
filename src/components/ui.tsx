@@ -1,5 +1,6 @@
 /** The small shared pieces the design repeats everywhere. */
 
+import { useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 import { accentFor, initialsFor } from "../lib/display";
@@ -26,6 +27,13 @@ export function Icon({
 }
 
 /**
+ * The one size every avatar is fetched at, in CSS pixels before the retina
+ * multiplier. Comfortably above the largest avatar the design draws (76px, in
+ * the room header), so nothing is ever upscaled.
+ */
+const AVATAR_FETCH_SIZE = 88;
+
+/**
  * The design's signature avatar: a chunky rounded tile with an ink border,
  * showing the real image when there is one and a neon monogram when there
  * isn't.
@@ -47,26 +55,39 @@ export function Avatar({
   fontSize?: number;
   style?: CSSProperties;
 }) {
-  const src = mediaUrl(mxc, { width: size, height: size });
-  const shared: CSSProperties = {
-    width: size,
-    height: size,
-    flex: "none",
-    borderRadius: radius ?? Math.round(size * 0.36),
-    border: "2px solid var(--ink-950)",
-    objectFit: "cover",
-    ...style,
-  };
+  // Every avatar in the app asks for one size, whatever it's drawn at.
+  //
+  // The size is part of the URL and therefore the cache key, so a 38px timeline
+  // avatar and a 66px card avatar would otherwise be two fetches of the same
+  // picture — and on a bad day the second one is a ten-second federation stall
+  // that ends in a monogram while the first renders fine. One bucket, scaled by
+  // CSS, means an avatar is fetched once and then always instant.
+  const src = mediaUrl(mxc, { width: AVATAR_FETCH_SIZE, height: AVATAR_FETCH_SIZE });
 
-  if (src) {
-    return <img src={src} alt="" style={shared} loading="lazy" draggable={false} />;
-  }
+  // The monogram is not just the no-avatar case: it's also what's shown while
+  // the image loads and if it never arrives. Remote avatars can take seconds or
+  // fail outright (see ARCHITECTURE.md on thumbnails), and the alternative is
+  // the WebView's broken-image glyph, which looks like a bug in us.
+  //
+  // These track *which* src succeeded rather than a plain loaded/failed flag:
+  // a cached image can fire `load` before an effect could reset the flag, and a
+  // state reset racing that event leaves a loaded image sitting at opacity 0
+  // behind its own monogram.
+  const [loadedSrc, setLoadedSrc] = useState<string>();
+  const [failedSrc, setFailedSrc] = useState<string>();
+  const loaded = !!src && loadedSrc === src;
 
   return (
     <div
       style={{
-        ...shared,
-        background: accentFor(id),
+        position: "relative",
+        overflow: "hidden",
+        width: size,
+        height: size,
+        flex: "none",
+        borderRadius: radius ?? Math.round(size * 0.36),
+        border: "2px solid var(--ink-950)",
+        background: loaded ? "var(--ink-900)" : accentFor(id),
         color: "var(--text-on-accent)",
         display: "flex",
         alignItems: "center",
@@ -75,9 +96,37 @@ export function Avatar({
         fontWeight: 800,
         fontSize: fontSize ?? Math.max(10, Math.round(size * 0.37)),
         userSelect: "none",
+        ...style,
       }}
     >
-      {initialsFor(name)}
+      {!loaded && initialsFor(name)}
+      {src && failedSrc !== src && (
+        <img
+          src={src}
+          alt=""
+          loading="lazy"
+          draggable={false}
+          // A cached image can finish before React attaches `onLoad`, so the
+          // element is asked directly on mount as well.
+          ref={(node) => {
+            if (node?.complete && node.naturalWidth > 0 && loadedSrc !== src) {
+              setLoadedSrc(src);
+            }
+          }}
+          onLoad={() => setLoadedSrc(src)}
+          onError={() => setFailedSrc(src)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            // Fades in over the monogram rather than popping.
+            opacity: loaded ? 1 : 0,
+            transition: "opacity var(--dur-fast) var(--ease-out)",
+          }}
+        />
+      )}
     </div>
   );
 }

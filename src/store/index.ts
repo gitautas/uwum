@@ -72,6 +72,12 @@ interface State {
   // panels
   showInfo: boolean;
   showSettings: boolean;
+  /**
+   * The open profile card, if any. Anchored to whatever avatar was clicked —
+   * one card at a time, owned here rather than by each avatar, so opening a
+   * second one closes the first without either knowing about the other.
+   */
+  profileCard: { userId: string; anchor: DOMRect } | null;
 
   /** Machine-local preferences, persisted outside the account. */
   settings: prefs.Settings;
@@ -101,6 +107,9 @@ interface Actions {
   toggleInfo(): void;
   openSettings(): void;
   closeSettings(): void;
+  /** Clicking the same avatar again closes the card, like every other popover. */
+  toggleProfile(userId: string, anchor: DOMRect): void;
+  closeProfile(): void;
   updateSettings(patch: Partial<prefs.Settings>): void;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
@@ -138,6 +147,7 @@ const initial: State = {
   drafts: {},
   showInfo: prefs.load().showInfoPanel,
   showSettings: false,
+  profileCard: null,
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
@@ -220,6 +230,12 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   openSettings: () => set({ showSettings: true }),
   closeSettings: () => set({ showSettings: false }),
+
+  toggleProfile: (userId, anchor) =>
+    set((s) => ({
+      profileCard: s.profileCard?.userId === userId ? null : { userId, anchor },
+    })),
+  closeProfile: () => set({ profileCard: null }),
 
   updateSettings: (patch) =>
     set((s) => {

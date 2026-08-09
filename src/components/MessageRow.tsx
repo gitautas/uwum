@@ -14,7 +14,8 @@ import { useMediaBlob } from "../lib/blobMedia";
 import { renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo } from "../lib/types";
 import { useStore } from "../store";
-import { Avatar, Icon, Spinner } from "./ui";
+import { AvatarButton, useProfileAnchor } from "./ProfileCard";
+import { Icon, Spinner } from "./ui";
 
 const QUICK_REACTIONS = ["uwu", "♡", "^-^", ">_<", "nice", "oh no"];
 
@@ -38,6 +39,7 @@ export function MessageRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const setDraft = useStore((s) => s.setDraft);
   const showBanner = useStore((s) => s.showBanner);
+  const senderAnchor = useProfileAnchor(item.sender);
 
   const author = displayNameFor(item.sender, item.senderName);
   const accent = accentFor(item.sender);
@@ -118,8 +120,8 @@ export function MessageRow({
         }}
       >
         {showHeader ? (
-          <Avatar
-            id={item.sender}
+          <AvatarButton
+            userId={item.sender}
             name={author}
             mxc={item.senderAvatar}
             size={38}
@@ -152,16 +154,20 @@ export function MessageRow({
               flexWrap: "wrap",
             }}
           >
-            <span
+            <button
+              {...senderAnchor}
+              aria-label={`${author}'s profile`}
               style={{
                 fontFamily: "var(--font-display)",
                 fontWeight: 800,
                 fontSize: 14.5,
                 color: accent,
+                cursor: "pointer",
+                padding: 0,
               }}
             >
               {author}
-            </span>
+            </button>
             <span
               style={{
                 fontFamily: "var(--font-mono)",

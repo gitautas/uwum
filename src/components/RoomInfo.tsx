@@ -4,6 +4,7 @@ import { accentFor, displayNameFor } from "../lib/display";
 import * as ipc from "../lib/ipc";
 import type { RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
+import { AvatarButton, useProfileAnchor } from "./ProfileCard";
 import { Avatar, Icon, RaveLabel, Spinner } from "./ui";
 
 export function RoomInfo({ room }: { room: RoomSummary }) {
@@ -231,6 +232,7 @@ function EncryptionCard({
 function MemberRow({ member }: { member: RoomMember }) {
   const name = displayNameFor(member.userId, member.displayName);
   const showBanner = useStore((s) => s.showBanner);
+  const anchor = useProfileAnchor(member.userId);
 
   return (
     <div
@@ -249,15 +251,19 @@ function MemberRow({ member }: { member: RoomMember }) {
       }}
     >
       <div style={{ position: "relative", flex: "none" }}>
-        <Avatar
-          id={member.userId}
+        <AvatarButton
+          userId={member.userId}
           name={name}
           mxc={member.avatarUrl}
           size={34}
           radius={12}
         />
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <button
+        {...anchor}
+        aria-label={`${name}'s profile`}
+        style={{ flex: 1, minWidth: 0, textAlign: "left", cursor: "pointer", padding: 0 }}
+      >
         <div
           className="uwu-ellipsis"
           style={{
@@ -279,7 +285,7 @@ function MemberRow({ member }: { member: RoomMember }) {
         >
           {member.userId}
         </div>
-      </div>
+      </button>
 
       {member.verification === "verified" ? (
         <Icon name="seal-check" size={14} color="var(--accent-primary)" />

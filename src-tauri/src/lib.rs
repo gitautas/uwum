@@ -62,6 +62,8 @@ pub fn run() {
             // media
             commands::get_profile,
             commands::set_profile,
+            commands::get_user_context,
+            commands::open_dm,
             commands::upload_media,
             commands::get_media_bytes,
             commands::save_media,

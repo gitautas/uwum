@@ -17,7 +17,8 @@ and both custom-protocol URL forms are handled — but neither is tested yet.
 Login (password and SSO), session persistence in the OS keychain, sliding sync,
 room list with spaces and favourites, timeline with replies, reactions, threads,
 edits, redactions, typing, read receipts and file upload, device verification,
-and voice calls over MatrixRTC.
+voice calls over MatrixRTC, and profiles — bio, status and cover photo, with a
+card behind every avatar.
 
 ## Where to look next
 
@@ -27,7 +28,7 @@ and voice calls over MatrixRTC.
 - [DESIGN.md](DESIGN.md) — the visual spec: tokens, voice, motion, and the rules
   the UI is meant to hold to.
 - [PLAN.md](PLAN.md) — features researched but not built: custom emoji and
-  stickers, room backgrounds, profile fields. Event shapes and traps included.
+  stickers, room backgrounds. Event shapes and traps included.
 
 ---
 

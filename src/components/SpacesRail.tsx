@@ -1,11 +1,10 @@
-import { useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { accentFor, initialsFor } from "../lib/display";
 import { mediaUrl } from "../lib/ipc";
 import { useStore } from "../store";
-import { ProfileCard } from "./ProfileCard";
-import { Avatar, Icon, PresenceDot } from "./ui";
+import { AvatarButton } from "./ProfileCard";
+import { Icon, PresenceDot } from "./ui";
 
 /**
  * The narrow left rail: the uwu mark, one tile per space, and your own avatar
@@ -21,9 +20,6 @@ export function SpacesRail() {
       openSettings: s.openSettings,
     })),
   );
-
-  const avatarButton = useRef<HTMLButtonElement>(null);
-  const [cardAnchor, setCardAnchor] = useState<DOMRect | null>(null);
 
   return (
     <div
@@ -121,35 +117,16 @@ export function SpacesRail() {
         </button>
         <div style={{ position: "relative" }}>
           {session && (
-            <button
-              ref={avatarButton}
-              onClick={() =>
-                setCardAnchor((open) =>
-                  open ? null : (avatarButton.current?.getBoundingClientRect() ?? null),
-                )
-              }
-              title="your profile"
-              style={{ cursor: "pointer", display: "flex", padding: 0 }}
-            >
-              <Avatar
-                id={session.userId}
-                name={session.displayName ?? session.userId}
-                mxc={session.avatarUrl}
-                size={38}
-                radius={14}
-              />
-            </button>
+            <AvatarButton
+              userId={session.userId}
+              name={session.displayName ?? session.userId}
+              mxc={session.avatarUrl}
+              size={38}
+              radius={14}
+            />
           )}
           <PresenceDot />
         </div>
-
-        {cardAnchor && session && (
-          <ProfileCard
-            userId={session.userId}
-            anchor={cardAnchor}
-            onClose={() => setCardAnchor(null)}
-          />
-        )}
       </div>
     </div>
   );

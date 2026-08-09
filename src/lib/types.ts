@@ -294,6 +294,27 @@ export interface Profile {
   coverUrl: string | null;
 }
 
+/** A room both of you are in, reduced to what the profile card draws. */
+export interface SharedRoom {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  isSpace: boolean;
+  isDirect: boolean;
+}
+
+/**
+ * The half of a profile card that comes from our own client rather than the
+ * homeserver's profile endpoint.
+ */
+export interface UserContext {
+  userId: string;
+  isMe: boolean;
+  verification: "verified" | "unverified" | "unknown";
+  dmRoomId: string | null;
+  sharedRooms: SharedRoom[];
+}
+
 /** A partial update: omit a field to leave it, pass "" to clear it. */
 export interface ProfileUpdate {
   bio?: string;

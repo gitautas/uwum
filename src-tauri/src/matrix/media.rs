@@ -12,6 +12,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{LazyLock, Mutex},
+    time::{Duration, Instant},
 };
 
 use matrix_sdk::{
@@ -82,6 +83,54 @@ pub struct FetchedMedia {
     pub mime: String,
 }
 
+/// Requests the server has recently refused, and when it refused them.
+///
+/// Remote media that the homeserver can't federate fails *slowly* — a ten
+/// second timeout, then `M_UNKNOWN`. Without this, every re-render of a room
+/// with a few such avatars queues another ten seconds of doomed requests, and
+/// they compete with the fetches that would have worked. A short memory turns
+/// the second attempt into an instant failure and lets the good media through.
+///
+/// Keyed by URI **and size**, not by URI. A failure is not always a property of
+/// the media: a size the server won't produce says nothing about a size it
+/// already has cached, and keying on the URI alone means one bad request blanks
+/// an avatar that was rendering perfectly well somewhere else.
+static FAILURES: LazyLock<Mutex<HashMap<String, Instant>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Long enough to stop a render loop from re-asking, short enough that a
+/// server which has since fetched the file gets another chance quickly.
+const FAILURE_MEMORY: Duration = Duration::from_secs(60);
+
+/// Bound on the failure map, so a long session can't grow it without limit.
+const MAX_REMEMBERED_FAILURES: usize = 1024;
+
+fn failure_key(mxc: &str, size: Option<(u32, u32)>) -> String {
+    match size {
+        Some((w, h)) => format!("{mxc}|{w}x{h}"),
+        None => format!("{mxc}|full"),
+    }
+}
+
+fn recently_failed(key: &str) -> bool {
+    let Ok(failures) = FAILURES.lock() else { return false };
+    failures.get(key).is_some_and(|at| at.elapsed() < FAILURE_MEMORY)
+}
+
+fn remember_failure(key: &str) {
+    let Ok(mut failures) = FAILURES.lock() else { return };
+    failures.retain(|_, at| at.elapsed() < FAILURE_MEMORY);
+    if failures.len() < MAX_REMEMBERED_FAILURES {
+        failures.insert(key.to_owned(), Instant::now());
+    }
+}
+
+fn forget_failure(key: &str) {
+    if let Ok(mut failures) = FAILURES.lock() {
+        failures.remove(key);
+    }
+}
+
 /// Fetch media by `mxc://` URI, optionally as a thumbnail of the given size.
 pub async fn fetch(
     client: &Client,
@@ -102,6 +151,14 @@ pub async fn fetch(
         remembered_source(mxc).unwrap_or_else(|| MediaSource::Plain(uri.to_owned()));
     let encrypted = matches!(source, MediaSource::Encrypted(_));
 
+    let failure_key = failure_key(mxc, size);
+    if recently_failed(&failure_key) {
+        return Err(Error::Other(format!(
+            "the server couldn't produce {mxc} at this size a moment ago; \
+             not asking again yet"
+        )));
+    }
+
     let format = match size {
         // Server-side thumbnails are impossible for encrypted media: the server
         // only has ciphertext to resize. Always take the whole file and let the
@@ -119,13 +176,36 @@ pub async fn fetch(
         _ => MediaFormat::File,
     };
 
-    let request = MediaRequestParameters { source, format };
+    let wanted_thumbnail = matches!(format, MediaFormat::Thumbnail(_));
+    let request = MediaRequestParameters { source: source.clone(), format };
 
-    let bytes = client
-        .media()
-        .get_media_content(&request, true)
-        .await
-        .map_err(|e| Error::Other(format!("couldn't load media: {e}")))?;
+    let bytes = match client.media().get_media_content(&request, true).await {
+        Ok(bytes) => bytes,
+
+        // A thumbnail can fail where the original succeeds: the server resizes
+        // on demand, and for media it hasn't federated yet that resize is what
+        // times out. It often still has — or can still fetch — the whole file,
+        // so ask for that before giving up. The WebView scales it for us.
+        Err(thumbnail_error) if wanted_thumbnail => {
+            tracing::debug!("thumbnail failed for {mxc}, trying the original: {thumbnail_error}");
+
+            let whole = MediaRequestParameters { source, format: MediaFormat::File };
+            match client.media().get_media_content(&whole, true).await {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    remember_failure(&failure_key);
+                    return Err(Error::Other(format!("couldn't load media: {error}")));
+                }
+            }
+        }
+
+        Err(error) => {
+            remember_failure(&failure_key);
+            return Err(Error::Other(format!("couldn't load media: {error}")));
+        }
+    };
+
+    forget_failure(&failure_key);
 
     // Homeservers don't hand back a content type through this API, so sniff the
     // magic bytes and fall back to the caller's hint. Serving the wrong type

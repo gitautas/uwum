@@ -363,6 +363,22 @@ pub async fn set_profile(
     profile::set_profile(&*state.core().await?, update).await
 }
 
+/// What we know about a person locally — verification, shared rooms, whether a
+/// DM already exists. Companion to `get_profile`, which is the server's half.
+#[tauri::command]
+pub async fn get_user_context(
+    state: State<'_, AppState>,
+    user_id: String,
+) -> Result<profile::UserContextDto> {
+    profile::get_user_context(&*state.core().await?, user_id).await
+}
+
+/// The DM with this person, created if there isn't one yet.
+#[tauri::command]
+pub async fn open_dm(state: State<'_, AppState>, user_id: String) -> Result<String> {
+    profile::open_dm(&*state.core().await?, user_id).await
+}
+
 #[tauri::command]
 pub async fn upload_media(state: State<'_, AppState>, path: String) -> Result<String> {
     profile::upload_media(&*state.core().await?, &path).await
