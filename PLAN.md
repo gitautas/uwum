@@ -201,9 +201,9 @@ this room".
 
 ---
 
-## 3. Profile cover photo and bio
+## 3. Profile cover photo and bio — BLOCKED
 
-Smallest, but gated on the homeserver.
+Smallest of the three, and currently not buildable. See the check below.
 
 ### Spec: MSC4133 extended profiles
 
@@ -222,17 +222,26 @@ gg.uwu.bio           → string
 gg.uwu.cover_url     → mxc://…
 ```
 
-### Check this first
+### Checked — not supported
 
-Before writing any UI, confirm Continuwuity implements MSC4133:
+Ran against m.uwu.lt (Continuwuity, 2026-08-09):
 
 ```bash
-curl -s https://m.uwu.lt/_matrix/client/versions | grep -o 'uk.tcpip.msc4133[^,]*'
+curl -s https://m.uwu.lt/_matrix/client/versions
 ```
 
-If it's absent, PUT will 404 or 400 and **this feature is dead on arrival** —
-stop there rather than building against it. Fall back options: put the bio in
-account data (visible only to you, which defeats the point), or wait.
+`unstable_features` returned `computer.gingershaped.msc4466`,
+`org.matrix.msc4155`, `org.matrix.simplified_msc3575` and
+`uk.half-shot.msc2666.query_mutual_rooms`. **No `uk.tcpip.msc4133`**, so
+`PUT /_matrix/client/v3/profile/{userId}/{key}` will 404 and there is nothing to
+build against.
+
+This isn't a stale server — it advertises up to `v1.18`. MSC4133 just isn't
+implemented yet. Re-run the check before picking this up; if it appears, the
+rest of this section still stands.
+
+The fallbacks aren't worth taking: account data is visible only to you, which
+defeats the purpose of a public bio.
 
 ### Work
 
@@ -258,4 +267,5 @@ assume it's room-scoped.
    upload path.
 3. Custom emoji and stickers — the big one, in this order: pack storage →
    picker → sending → reactions → import → autocomplete.
-4. Profile fields — only after the homeserver check passes.
+4. Profile fields — blocked on the homeserver. Re-run the version check first;
+   don't start until `uk.tcpip.msc4133` shows up.
