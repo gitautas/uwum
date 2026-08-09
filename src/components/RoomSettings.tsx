@@ -133,6 +133,8 @@ function RoomEditor({
 function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) {
   const showBanner = useStore((s) => s.showBanner);
   const selectRoom = useStore((s) => s.selectRoom);
+  const markLeaving = useStore((s) => s.markLeaving);
+  const unmarkLeaving = useStore((s) => s.unmarkLeaving);
   const [confirming, setConfirming] = useState(false);
   const [forget, setForget] = useState(false);
 
@@ -146,16 +148,20 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
   const alone = room.memberCount <= 1;
 
   async function leave() {
-    // Look away first. While the leave is in flight the room panel would
-    // otherwise keep asking about a room we're on our way out of — the member
-    // list fetch comes straight back 403 — and the open timeline is a
+    // Look away first, and take the room out of the sidebar while we're at it.
+    // The server needs a round trip and a sync to agree that we've left, and
+    // until then the room is still joined: it stays listed, stays clickable,
+    // and typing in it produces nothing but 403s. The open timeline is also a
     // subscriber to storage that forgetting is about to delete.
+    markLeaving(room.id);
     onLeft();
     await selectRoom(null);
 
     try {
       await ipc.leaveRoom(room.id, forget);
     } catch (e) {
+      // Still in it after all — put it back where it was.
+      unmarkLeaving(room.id);
       showBanner("error", ipc.asUwuError(e).message);
     }
   }
