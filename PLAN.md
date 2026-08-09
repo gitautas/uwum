@@ -5,9 +5,9 @@ from cold: the spec, the exact event shapes, the APIs that already exist in the
 version we pin, which files change, and the traps.
 
 Two protocol features (custom emoji, room backgrounds), then interface work that
-came out of using the thing, then the one piece of the client that is simply
-absent: making and joining rooms. Extended profiles are built; what was learned
-doing them is at the bottom.
+came out of using the thing, then room categories. Sections marked *built* are
+kept as a record of what the code does and what it cost to find out — read those
+before changing anything near them.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) first — several traps there (the media
 cache, the sanitiser, zustand selectors) are load-bearing for this work.
@@ -209,31 +209,16 @@ this room".
 ## 3. Interface work
 
 Four asks, all frontend except where noted. None of them need a spec — they're
-ours to decide — so what's written down here is the shape and the traps.
+ours to decide — so what's written down here is the shape and the traps. Two are
+built; two aren't.
 
-### 3a. Zoom into a picture
+### 3a. Zoom into a picture — built
 
-Any image should open full-size: an attachment in the timeline, an avatar, a
-profile card's cover. Right now a photo is only ever the 400×320 box the
-timeline draws it in, and an avatar is 38px forever.
-
-**Work** — a new `src/components/Lightbox.tsx`: a portal over everything, the
-image centred at its natural size (capped to the window), click-away and Escape
-out, arrow keys between the images in the room if that's cheap. Called from
-`MessageRow`'s `ImageBody`, from `Avatar` (a click with no profile card
-attached), and from the cover in `ProfileCard`.
-
-**Traps**
-
-- **Ask for the original, not a thumbnail.** `mediaUrl(mxc)` with no size gives
-  the full file; passing a size here would both blur the image and add another
-  entry to the cache-key mess described in ARCHITECTURE.md.
-- Encrypted attachments already work through `uwum://` because the timeline
-  registered their `MediaSource` — but only for URIs the timeline has seen.
-  Don't build the lightbox to take a bare mxc from somewhere else.
-- An animated GIF at full size decodes at full size. Fine for one, so keep the
-  lightbox to one image at a time.
-- "Save" belongs here too: `save_media` already exists and takes a destination.
+`Lightbox.tsx`, opened from timeline images and stickers, room avatars, and the
+avatar and cover on a profile card. It asks for the original — `mediaUrl` with
+no width or height — because a thumbnail scaled up is blurry *and* a size is a
+cache key. One image at a time: an original-size animated GIF decodes at
+original size. Save goes through the `save_media` command that already existed.
 
 ### 3b. Stage attachments in the composer
 
@@ -288,71 +273,119 @@ share a component rather than growing a second copy of the layout.
 - This is the third caller of `get_profile` — the cache mentioned at the bottom
   of this file stops being optional here.
 
-### 3d. Room toggles as icons
+### 3d. Room toggles as icons — built
 
-The three switches at the bottom of `RoomInfo` — mute, favourite, low priority —
-take a third of the panel to say three booleans. They should be a row of icon
-buttons: filled and accent-coloured when on, hairline outline when off, with the
-label as a tooltip.
+Mute, favourite and low priority are one row of `IconToggle`s. That component
+and the switch from `SettingsView` both live in `ui.tsx` now — there were two
+hand-rolled switches drawn differently in two files.
 
-`ToggleRow` in `RoomInfo.tsx` is the only user of that pattern, so it can be
-replaced outright. Note that `SettingsView.tsx` has its own private `Toggle` —
-a second, differently-drawn switch. Two hand-rolled switches is already one too
-many: whatever replaces `ToggleRow` belongs in `ui.tsx`, and `Toggle` should
-move there with it rather than a third one appearing later.
+Renaming and leaving moved out of that panel entirely, into a dialog behind the
+pencil. `Modal` is in `ui.tsx` for the same reason as `IconToggle`.
 
 ---
 
-## 4. Creating and joining rooms
+## 4. Creating and joining rooms — built
 
-The app cannot make a room, and the only way into one is to be invited. This is
-the largest hole in the client, and it is *missing*, not broken: `git grep` and
-`git log --all -S` over every ref find no create-room code that was ever written
-and later removed. `joinRoom` in `src/lib/ipc.ts` has existed since the IPC
-bridge landed and has never had a caller.
+A `+` in the room list header; create and join in one dialog. `create_room`
+takes a name, topic, public or invite-only, an optional alias and encryption.
+The empty state offers the button it used to only describe.
 
-**Where the memory of a button comes from.** `RoomList.tsx` renders "no rooms
-yet — join one to get started" whenever the filtered list is empty — which
-includes selecting a space whose rooms you haven't joined, since `filterRooms`
-returns nothing for it. So picking a space can replace the room list with an
-instruction to do something the UI offers no way of doing. Fix the empty state
-in the same change; it should offer the action it's naming.
+What this cost, and is worth knowing before touching any of it again:
+
+- **An alias is not a permission.** It's a nickname resolving to a room ID; an
+  invite-only room can have one without becoming joinable. Who gets in is the
+  join rule. The field was originally hidden behind "anyone can join", which
+  implied a connection that doesn't exist.
+- **A new room must be filed at both ends.** `m.space.child` in the space is the
+  half other clients read, but the store's copy of a space's children is only
+  re-read on a 60 second poll, so the room appeared loose for up to a minute.
+  The room's own `m.space.parent` lands with the room's own diff, immediately.
+  We hold every power in a room we just made, so that half always succeeds; the
+  space's half can fail on someone else's space, and only warns.
+- **`forget` refuses while the room still looks joined**, and `leave` only sends
+  the request — the state turns Left when the sync carrying it comes back. So
+  forgetting straight after leaving always failed, and the room reappeared with
+  your own leave as its last event. It now waits for Left, up to ten seconds.
+- **An open timeline is a live subscriber to the room's event-cache rows**, and
+  forgetting deletes exactly those rows. That combination panicked the SDK from
+  a background task — "The chunk is not found" — and took the process with it.
+  Leaving closes every timeline for the room first.
+- **A leave isn't instant, and the room stays joined until it lands.** Left
+  listed, it's clickable, and you can type into a room you've left; every
+  request after that is a 403 and the message dies in the send queue. Rooms with
+  a leave in flight are held in `leavingRooms` and hidden.
+
+Still missing here: editing a room's avatar, and inviting people from anywhere
+other than a room you're already in.
+
+---
+
+## 5. Room categories, Discord style
+
+Rooms inside a space should group under collapsible headings, ordered
+deliberately rather than by recency.
+
+### Subspaces are the categories
+
+Decided rather than discovered: a category is a **subspace**, so the grouping is
+the same one Element shows and the same one other people see in their own
+spaces. The alternative — uwum-only folders in account data — would let you
+arrange anything, including rooms in no space at all, but nobody else would see
+it and it would ignore how a space's owner organised things.
+
+The cost of the choice: rearranging a space needs power *in that space*, so you
+can't regroup someone else's server to taste.
+
+### The event already carries what's needed
+
+`m.space.child` has more in it than we keep:
+
+```
+content: { via: ["server"], order: "aaa", suggested: false }
+```
+
+`order` is a string sorted by Unicode codepoint, ascii `\x20`–`\x7E` only, 50
+characters max; children without one come after those with one, ordered by their
+create event's timestamp. Invalid `order` values must be ignored rather than
+treated as absent — ruma already returns `None` for them.
+
+`space_children` currently throws all of this away and returns bare IDs, and
+`SpaceSummary.children` is a flat `Vec<String>` with no idea which children are
+themselves spaces.
 
 ### Work
 
-**Rust** (`matrix/rooms.rs`) — `create_room(request) -> room_id` over
-`client.create_room(...)`. The parameters worth exposing: name, topic, whether
-it's public or invite-only (`RoomPreset`), whether to encrypt it, and an
-optional list of people to invite. Encryption is an `m.room.encryption` initial
-state event; `Client::create_dm` in the SDK is the worked example of setting it,
-and it's the reason DMs made here are encrypted.
+**Rust** — `space_children` keeps `{ id, order, suggested }`, and marks which
+children are spaces (`client.get_room(id).is_some_and(|r| r.is_space())`, which
+is a store read, not a request). `SpaceSummary` grows a structured `children`.
+Sorting belongs here, not in the UI: `order` first, then create timestamp.
 
-`join_room` already exists and takes an alias or ID.
-
-**Frontend** — a `+` in the room list header opening a small dialog with two
-modes, create and join. Reuse the settings modal's shape rather than inventing a
-third kind of overlay.
+**Frontend** — `groupRooms` learns about subspaces, so the sidebar's sections
+come from the space rather than from the fixed invites/DMs/rooms split when a
+space is selected. Sections collapse, remember their state in local settings,
+and roll up unread counts when closed. "New category" is a subspace, added to
+the create dialog.
 
 ### Traps
 
-- **A room created while a space is selected should land in that space**, or it
-  vanishes from the list the moment it's made — the user is looking at a
-  filtered view. That means sending `m.space.child` into the space, which needs
-  power there; when the user hasn't got it, say so rather than silently making
-  an orphan room. Setting `m.space.parent` on the child too is polite but not
-  sufficient on its own — see the space-membership trap in ARCHITECTURE.md.
-- Encryption cannot be turned on later in any meaningful sense, and cannot be
-  turned off at all. The checkbox at creation is the only moment it's a choice,
-  so word it accordingly.
-- A public room wants an alias; alias collisions are a normal, expected error
-  and need to read as one.
-- After `create_room` the room arrives through the sliding-sync stream like any
-  other, so don't insert it into the store by hand — select it by ID and let the
-  diff fill it in.
+- **A child can be in several spaces**, and a room can be a child of a space
+  that's also a child of the space you're looking at. Decide what to do about
+  depth before building it — one level of nesting is what Discord has and is
+  probably all this wants.
+- A space's children include rooms you haven't joined. They're worth showing as
+  something joinable rather than hiding — that's the one place the room list can
+  usefully offer a room you don't have.
+- Reordering means writing `m.space.child` back with a new `order`, which needs
+  power in the space. Fall back to read-only ordering when it's not ours.
+- The children list is still only re-read on that 60 second poll. Any change we
+  make to a space needs `refreshSpaces()` after it, the same as room creation
+  does now.
 
 ---
 
-## 5. Profile cover photo and bio — built
+---
+
+## 6. Profile cover photo and bio — built
 
 Kept as a record of what the code does and why, not as work to do.
 
@@ -378,13 +411,14 @@ size, worth a cache if cards get opened in bulk.
 
 ## Suggested order
 
-1. Creating and joining rooms. Small, and the app is hard to defend without it —
-   it currently tells you to join a room and then offers no way to.
-2. The interface work, cheapest first: room toggles (3d), then the lightbox
-   (3a), then the DM sidebar header (3c) — which is where the profile cache
-   stops being optional — then staging attachments in the composer (3b), the
-   only one of the four with a real design decision in it.
-3. Room backgrounds — self-contained, finishable in one sitting. The upload it
-   needs already exists as `upload_media`, built for cover photos.
-4. Custom emoji and stickers — the big one, in this order: pack storage →
+1. The DM sidebar header (3c). Small, and it starts with the profile cache that
+   everything touching profiles now wants.
+2. Room categories (5). The biggest of what's left, and the one that changes how
+   the sidebar reads. Backend first: keep `order` and `suggested`, and mark
+   which children are spaces.
+3. Staging attachments in the composer (3b). The only item with a real design
+   decision in it — N events or the MSC4274 gallery flag.
+4. Room backgrounds (2) — self-contained, finishable in one sitting. The upload
+   it needs already exists as `upload_media`, built for cover photos.
+5. Custom emoji and stickers (1) — the big one, in this order: pack storage →
    picker → sending → reactions → import → autocomplete.
