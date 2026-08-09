@@ -12,13 +12,16 @@ import type {
   CallCredentials,
   CallParticipants,
   DeviceInfo,
-  Diff,
   Profile,
   ProfileUpdate,
   HomeserverInfo,
+  NewRoom,
+  NewRoomResult,
   RecoveryStatus,
   RoomMember,
-  RoomSummary,
+  RoomPermissions,
+  RoomsSnapshot,
+  RoomsUpdate,
   SasStateInfo,
   SendOptions,
   SessionInfo,
@@ -75,17 +78,34 @@ export const logout = (wipe = false) => invoke<void>("logout", { wipe });
  * the backend's first push has no listener. Call this once after subscribing;
  * diffs keep it current from then on.
  */
-export const getRooms = () => invoke<RoomSummary[]>("get_rooms");
+export const getRooms = () => invoke<RoomsSnapshot>("get_rooms");
 
 export const getSpaces = () => invoke<SpaceSummary[]>("get_spaces");
 
 export const getMembers = (roomId: string) =>
   invoke<RoomMember[]>("get_members", { roomId });
 
+/** Make a room. Returns its ID, plus a warning if filing it under a space failed. */
+export const createRoom = (room: NewRoom) =>
+  invoke<NewRoomResult>("create_room", { room });
+
 export const joinRoom = (aliasOrId: string) =>
   invoke<string>("join_room", { aliasOrId });
 
-export const leaveRoom = (roomId: string) => invoke<void>("leave_room", { roomId });
+/** Leave a room. `forget` also drops it from the account entirely. */
+export const leaveRoom = (roomId: string, forget = false) =>
+  invoke<void>("leave_room", { roomId, forget });
+
+/** Rename a room or change its topic. Omitted fields are left alone. */
+export const updateRoom = (roomId: string, patch: { name?: string; topic?: string }) =>
+  invoke<void>("update_room", {
+    roomId,
+    name: patch.name ?? null,
+    topic: patch.topic ?? null,
+  });
+
+export const getRoomPermissions = (roomId: string) =>
+  invoke<RoomPermissions>("get_room_permissions", { roomId });
 
 export const inviteUser = (roomId: string, userId: string) =>
   invoke<void>("invite_user", { roomId, userId });
@@ -344,8 +364,8 @@ export const getActiveCalls = () => invoke<string[]>("get_active_calls");
 export const onOpenSettings = (fn: () => void): Promise<UnlistenFn> =>
   listen("uwum://open-settings", () => fn());
 
-export const onRooms = (fn: (diffs: Diff<RoomSummary>[]) => void): Promise<UnlistenFn> =>
-  listen<Diff<RoomSummary>[]>("matrix://rooms", (e) => fn(e.payload));
+export const onRooms = (fn: (update: RoomsUpdate) => void): Promise<UnlistenFn> =>
+  listen<RoomsUpdate>("matrix://rooms", (e) => fn(e.payload));
 
 export const onTimeline = (fn: (update: TimelineUpdate) => void): Promise<UnlistenFn> =>
   listen<TimelineUpdate>("matrix://timeline", (e) => fn(e.payload));

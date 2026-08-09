@@ -1,6 +1,7 @@
 /** The small shared pieces the design repeats everywhere. */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties, ReactNode } from "react";
 
 import { accentFor, initialsFor } from "../lib/display";
@@ -443,6 +444,88 @@ export function Tag({
       {icon && <Icon name={icon} size={11} color={colour} />}
       {children}
     </span>
+  );
+}
+
+/**
+ * A centred dialog over a dimmed app: backdrop click and Escape both close it.
+ *
+ * Here rather than in a view because there are several of these now, and the
+ * third copy of a pattern is where DESIGN.md says it stops being a view's
+ * business.
+ */
+export function Modal({
+  title,
+  onClose,
+  width = 420,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  width?: number;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return createPortal(
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 180,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+        background: "rgba(11,11,15,.7)",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="uwu-scroll"
+        style={{
+          width,
+          maxWidth: "100%",
+          maxHeight: "calc(100vh - 48px)",
+          overflowY: "auto",
+          padding: 24,
+          borderRadius: 24,
+          background: "var(--surface-card-raised)",
+          border: "1px solid var(--border-default)",
+          boxShadow: "var(--shadow-pop)",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 800,
+              fontSize: 20,
+              flex: 1,
+            }}
+          >
+            {title}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="close"
+            style={{ cursor: "pointer", display: "flex" }}
+          >
+            <Icon name="x" size={15} color="var(--text-tertiary)" />
+          </button>
+        </div>
+
+        {children}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

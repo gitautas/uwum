@@ -12,7 +12,8 @@ import { applyDiffs } from "../lib/diff";
 import * as ipc from "../lib/ipc";
 import * as prefs from "../lib/settings";
 import type {
-  Diff,
+  RoomsSnapshot,
+  RoomsUpdate,
   RoomSummary,
   SasStateInfo,
   SessionInfo,
@@ -54,6 +55,30 @@ interface State {
 
   // rooms
   rooms: RoomSummary[];
+  /**
+   * The last room-list batch folded into `rooms`.
+   *
+   * The snapshot and the diff stream arrive over different channels and can
+   * cross in flight, so both carry this number: a batch at or below it is
+   * already in the list, and a batch more than one ahead means one went
+   * missing and the list can no longer be trusted to index correctly.
+   */
+  roomsSeq: number;
+  /** A resync is in flight; diffs are unreliable until it lands. */
+  roomsResyncing: boolean;
+  /**
+   * Rooms we've asked to leave, which the server hasn't confirmed yet.
+   *
+   * A leave takes a round trip plus a sync to come back, and until it does the
+   * room is still joined as far as the room list is concerned — so it sits
+   * there, clickable, and you can type into a room you've left. Every request
+   * that follows is a 403. These are hidden and unselectable in the meantime.
+   *
+   * Kept beside the room list rather than filtered out of it: `rooms` is
+   * applied from diffs whose indices must keep matching the backend's copy, so
+   * nothing may be added to or removed from it locally.
+   */
+  leavingRooms: string[];
   spaces: SpaceSummary[];
   activeSpaceId: string | null;
   activeRoomId: string | null;
@@ -80,6 +105,7 @@ interface State {
   profileCard: { userId: string; anchor: DOMRect } | null;
   /** The picture being looked at full-size, if any. */
   lightbox: { mxc: string; name: string } | null;
+  showCreateRoom: boolean;
 
   /** Machine-local preferences, persisted outside the account. */
   settings: prefs.Settings;
@@ -97,10 +123,18 @@ interface State {
 
 interface Actions {
   setSession(session: SessionInfo | null): void;
-  setRooms(rooms: RoomSummary[]): void;
+  setRooms(snapshot: RoomsSnapshot): void;
   setBootstrapped(v: boolean): void;
-  applyRoomDiffs(diffs: Diff<RoomSummary>[]): void;
+  applyRoomDiffs(update: RoomsUpdate): void;
   setSpaces(spaces: SpaceSummary[]): void;
+  /** Re-read the whole room list after a dropped batch. */
+  resyncRooms(): Promise<void>;
+  /** Hide a room while its leave is in flight. */
+  markLeaving(roomId: string): void;
+  /** Put it back — the leave failed, or we've joined it again. */
+  unmarkLeaving(roomId: string): void;
+  /** Re-read the spaces now rather than waiting for the slow poll. */
+  refreshSpaces(): Promise<void>;
   setActiveSpace(id: string | null): void;
   selectRoom(roomId: string | null): Promise<void>;
   openThread(threadRoot: string | null): Promise<void>;
@@ -114,6 +148,8 @@ interface Actions {
   closeProfile(): void;
   openLightbox(mxc: string, name: string): void;
   closeLightbox(): void;
+  openCreateRoom(): void;
+  closeCreateRoom(): void;
   updateSettings(patch: Partial<prefs.Settings>): void;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
@@ -138,6 +174,9 @@ const initial: State = {
   bootstrapped: false,
   syncStatus: { state: "idle", message: null },
   rooms: [],
+  roomsSeq: 0,
+  roomsResyncing: false,
+  leavingRooms: [],
   spaces: [],
   activeSpaceId: null,
   activeRoomId: null,
@@ -153,6 +192,7 @@ const initial: State = {
   showSettings: false,
   profileCard: null,
   lightbox: null,
+  showCreateRoom: false,
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
@@ -165,16 +205,72 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   setSession: (session) => set({ session }),
 
-  setRooms: (rooms) => set({ rooms }),
+  setRooms: (snapshot) =>
+    set((s) =>
+      // A snapshot older than what we've already applied is stale news; it
+      // would undo batches that arrived while it was being fetched.
+      snapshot.seq >= s.roomsSeq
+        ? { rooms: snapshot.rooms, roomsSeq: snapshot.seq, roomsResyncing: false }
+        : { roomsResyncing: false },
+    ),
   setBootstrapped: (bootstrapped) => set({ bootstrapped }),
 
-  applyRoomDiffs: (diffs) => set((s) => ({ rooms: applyDiffs(s.rooms, diffs) })),
+  applyRoomDiffs: ({ seq, diffs }) => {
+    const { roomsSeq, roomsResyncing } = get();
+
+    // Already in the list: this batch was folded in before the snapshot we
+    // hold was taken.
+    if (seq <= roomsSeq) return;
+
+    // A gap means a batch went missing, so every index in this one counts
+    // against a list we don't have. Applying it would silently misplace rooms;
+    // ask for the truth instead.
+    if (seq > roomsSeq + 1) {
+      if (!roomsResyncing) {
+        set({ roomsResyncing: true });
+        void get().resyncRooms();
+      }
+      return;
+    }
+
+    if (roomsResyncing) return;
+    set((s) => ({ rooms: applyDiffs(s.rooms, diffs), roomsSeq: seq }));
+  },
+
+  markLeaving: (roomId) =>
+    set((s) =>
+      s.leavingRooms.includes(roomId)
+        ? {}
+        : { leavingRooms: [...s.leavingRooms, roomId] },
+    ),
+
+  unmarkLeaving: (roomId) =>
+    set((s) => ({ leavingRooms: s.leavingRooms.filter((id) => id !== roomId) })),
+
+  resyncRooms: async () => {
+    try {
+      get().setRooms(await ipc.getRooms());
+    } catch {
+      // Leave the flag set: the next batch will try again.
+      set({ roomsResyncing: false });
+    }
+  },
 
   setSpaces: (spaces) => set({ spaces }),
+
+  refreshSpaces: async () => {
+    try {
+      set({ spaces: await ipc.getSpaces() });
+    } catch {
+      // The poll will come round again; nothing here is worth a banner.
+    }
+  },
 
   setActiveSpace: (activeSpaceId) => set({ activeSpaceId }),
 
   selectRoom: async (roomId) => {
+    if (roomId && get().leavingRooms.includes(roomId)) return;
+
     const previous = get().activeRoomId;
     const previousThread = get().activeThreadRoot;
     if (previous === roomId) return;
@@ -244,6 +340,9 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   openLightbox: (mxc, name) => set({ lightbox: { mxc, name } }),
   closeLightbox: () => set({ lightbox: null }),
+
+  openCreateRoom: () => set({ showCreateRoom: true }),
+  closeCreateRoom: () => set({ showCreateRoom: false }),
 
   updateSettings: (patch) =>
     set((s) => {
@@ -365,7 +464,8 @@ export function filterRooms(
     filter,
     search,
     spaces,
-  }: Pick<State, "activeSpaceId" | "filter" | "search" | "spaces">,
+    leavingRooms,
+  }: Pick<State, "activeSpaceId" | "filter" | "search" | "spaces" | "leavingRooms">,
 ): RoomSummary[] {
   const needle = search.trim().toLowerCase();
 
@@ -380,6 +480,8 @@ export function filterRooms(
   const visible = rooms.filter((room) => {
     if (room.isSpace) return false;
     if (room.membership === "left" || room.membership === "banned") return false;
+    // Still joined as far as the server is concerned, but on its way out.
+    if (leavingRooms.includes(room.id)) return false;
 
     if (activeSpaceId) {
       const inSpace =

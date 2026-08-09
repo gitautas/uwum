@@ -86,6 +86,33 @@ export interface RoomSummary {
   isVideoRoom: boolean;
 }
 
+/** What the create-room dialog collects. */
+export interface NewRoom {
+  name: string;
+  topic?: string;
+  /** Anyone can find and join it, and it's listed in the directory. */
+  isPublic?: boolean;
+  /** Alias localpart for a public room — `movies`, not `#movies:server`. */
+  alias?: string;
+  encrypted?: boolean;
+  invite?: string[];
+  /** The space to file it under, if one was open. */
+  parentSpace?: string | null;
+}
+
+export interface NewRoomResult {
+  roomId: string;
+  /** The room was made but couldn't be filed under the space. Not an error. */
+  spaceWarning: string | null;
+}
+
+/** What this account may change about a room. */
+export interface RoomPermissions {
+  canRename: boolean;
+  canSetTopic: boolean;
+  canInvite: boolean;
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;
@@ -219,6 +246,18 @@ export type Diff<T> =
   | { op: "remove"; index: number }
   | { op: "truncate"; length: number }
   | { op: "reset"; values: T[] };
+
+/** A numbered batch of room-list changes. */
+export interface RoomsUpdate {
+  seq: number;
+  diffs: Diff<RoomSummary>[];
+}
+
+/** The room list as it stands, and the last batch folded into it. */
+export interface RoomsSnapshot {
+  seq: number;
+  rooms: RoomSummary[];
+}
 
 export interface TimelineUpdate {
   /** Room ID, or `<roomId>|<threadRoot>` for a thread timeline. */

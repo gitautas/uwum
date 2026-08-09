@@ -329,7 +329,7 @@ pub async fn bootstrap(
         room_list,
         pointer,
         data_dir,
-        rooms: Mutex::new(Vec::new()),
+        rooms: Mutex::new(Default::default()),
         timelines: Mutex::new(Default::default()),
         tasks: Mutex::new(Vec::new()),
         shutting_down: AtomicBool::new(false),

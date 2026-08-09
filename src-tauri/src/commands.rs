@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::{
     dto::{
-        HomeserverInfo, RoomMemberDto, RoomSummary, SendOptions, SessionInfo, SpaceSummary,
+        HomeserverInfo, RoomMemberDto, RoomsSnapshot, SendOptions, SessionInfo, SpaceSummary,
         TimelineItemDto,
     },
     error::{Error, Result},
@@ -95,8 +95,10 @@ pub async fn current_session(state: State<'_, AppState>) -> Result<Option<Sessio
 /// before the UI is listening. The UI calls this once it has subscribed, and
 /// applies diffs from then on.
 #[tauri::command]
-pub async fn get_rooms(state: State<'_, AppState>) -> Result<Vec<RoomSummary>> {
-    Ok(state.core().await?.rooms.lock().await.clone())
+pub async fn get_rooms(state: State<'_, AppState>) -> Result<RoomsSnapshot> {
+    let core = state.core().await?;
+    let mirror = core.rooms.lock().await;
+    Ok(RoomsSnapshot { seq: mirror.seq, rooms: mirror.rooms.clone() })
 }
 
 #[tauri::command]
@@ -112,14 +114,48 @@ pub async fn get_members(
     rooms::members(&*state.core().await?, &parse_room_id(&room_id)?).await
 }
 
+/// Make a room, optionally filing it under the space that's open.
+#[tauri::command]
+pub async fn create_room(
+    state: State<'_, AppState>,
+    room: rooms::NewRoom,
+) -> Result<rooms::NewRoomResult> {
+    rooms::create(&*state.core().await?, room).await
+}
+
 #[tauri::command]
 pub async fn join_room(state: State<'_, AppState>, alias_or_id: String) -> Result<String> {
     rooms::join(&*state.core().await?, &alias_or_id).await
 }
 
+/// Leave a room. `forget` also drops it from the account entirely.
 #[tauri::command]
-pub async fn leave_room(state: State<'_, AppState>, room_id: String) -> Result<()> {
-    rooms::leave(&*state.core().await?, &parse_room_id(&room_id)?).await
+pub async fn leave_room(
+    state: State<'_, AppState>,
+    room_id: String,
+    forget: bool,
+) -> Result<()> {
+    rooms::leave(&*state.core().await?, &parse_room_id(&room_id)?, forget).await
+}
+
+/// Rename a room or change its topic. Omitted fields are left alone.
+#[tauri::command]
+pub async fn update_room(
+    state: State<'_, AppState>,
+    room_id: String,
+    name: Option<String>,
+    topic: Option<String>,
+) -> Result<()> {
+    rooms::update(&*state.core().await?, &parse_room_id(&room_id)?, name, topic).await
+}
+
+/// What this account may change about a room.
+#[tauri::command]
+pub async fn get_room_permissions(
+    state: State<'_, AppState>,
+    room_id: String,
+) -> Result<rooms::RoomPermissions> {
+    rooms::permissions(&*state.core().await?, &parse_room_id(&room_id)?).await
 }
 
 #[tauri::command]

@@ -5,6 +5,7 @@ import * as ipc from "./lib/ipc";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
+import { CreateRoom } from "./components/CreateRoom";
 import { DropZone } from "./components/DropZone";
 import { Lightbox } from "./components/Lightbox";
 import { LoginScreen } from "./components/LoginScreen";
@@ -138,6 +139,7 @@ function Shell() {
       <ProfileCard />
       <DropZone />
       <Lightbox />
+      <CreateRoom />
       <VerificationModal />
       <SyncIndicator />
 
@@ -279,10 +281,18 @@ function useBackendEvents() {
     ];
 
     // Sync is already running by the time this mounts, so the backend's first
-    // room-list push has come and gone. Take a snapshot now that we're
-    // listening; diffs carry it forward from here.
-    ipc
-      .getRooms()
+    // room-list push has come and gone. Take a snapshot to catch up — but only
+    // once the listeners are actually attached.
+    //
+    // `listen` is asynchronous: it registers the handler over IPC and resolves
+    // afterwards. Firing the snapshot alongside it leaves a window where a diff
+    // is emitted and nobody is listening, and a *dropped* diff is worse than a
+    // late one — every index in every diff after it refers to a list one entry
+    // longer or shorter than ours, so rooms start landing in the wrong place.
+    // (`applyDiff` clamps rather than corrupting, and a later `reset` puts it
+    // right, but the drift is real until then.)
+    void Promise.all(subscriptions)
+      .then(() => ipc.getRooms())
       .then(store.setRooms)
       .catch((e) => store.showBanner("error", ipc.asUwuError(e).message));
 

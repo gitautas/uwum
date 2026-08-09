@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::task::JoinHandle;
 
 use crate::{
-    dto::{Diff, LatestEvent, RoomMemberDto, RoomSummary, SpaceSummary},
+    dto::{Diff, LatestEvent, RoomMemberDto, RoomSummary, RoomsUpdate, SpaceSummary},
     error::{Error, Result},
     events::EV_ROOMS,
     matrix::MatrixCore,
@@ -215,16 +215,19 @@ pub fn spawn_room_list_task(app: AppHandle, core: Arc<MatrixCore>) -> JoinHandle
                 converted.push(convert_room_diff(diff).await);
             }
 
-            // Keep the mirror in step before emitting, so a `get_rooms` racing
-            // with this update sees the same list the event describes.
-            {
+            // Fold into the mirror and take a sequence number in one locked
+            // step, so the snapshot a `get_rooms` returns always states exactly
+            // which batches it already contains.
+            let update = {
                 let mut mirror = core.rooms.lock().await;
                 for diff in &converted {
-                    apply_diff(&mut mirror, diff);
+                    apply_diff(&mut mirror.rooms, diff);
                 }
-            }
+                mirror.seq += 1;
+                RoomsUpdate { seq: mirror.seq, diffs: converted }
+            };
 
-            if let Err(e) = app.emit(EV_ROOMS, &converted) {
+            if let Err(e) = app.emit(EV_ROOMS, &update) {
                 tracing::warn!("couldn't emit room list update: {e}");
             }
         }
@@ -447,15 +450,258 @@ async fn space_children(space: &Room) -> Vec<String> {
 // room actions
 // ---------------------------------------------------------------------------
 
+/// What the create-room dialog collects.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRoom {
+    pub name: String,
+    #[serde(default)]
+    pub topic: Option<String>,
+    /// Anyone can find and join it, and it gets listed in the directory.
+    #[serde(default)]
+    pub is_public: bool,
+    /// Alias localpart for a public room — `movies`, not `#movies:server`.
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub encrypted: bool,
+    #[serde(default)]
+    pub invite: Vec<String>,
+    /// The space to file it under, if one was open when the user hit create.
+    #[serde(default)]
+    pub parent_space: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRoomResult {
+    pub room_id: String,
+    /// The room exists, but it couldn't be filed under the space. Not an error:
+    /// the room is real and usable, it's just loose.
+    pub space_warning: Option<String>,
+}
+
+/// Create a room, and file it under a space if one was open.
+pub async fn create(core: &MatrixCore, new: NewRoom) -> Result<NewRoomResult> {
+    use matrix_sdk::ruma::{
+        api::client::room::{Visibility, create_room},
+        events::{InitialStateEvent, room::encryption::RoomEncryptionEventContent},
+    };
+
+    let name = new.name.trim();
+    if name.is_empty() {
+        return Err(Error::Other("give it a name first~".into()));
+    }
+
+    let mut request = create_room::v3::Request::new();
+    request.name = Some(name.to_owned());
+    request.topic = new.topic.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+
+    request.preset = Some(if new.is_public {
+        create_room::v3::RoomPreset::PublicChat
+    } else {
+        create_room::v3::RoomPreset::PrivateChat
+    });
+    // Directory listing follows the join rule: a room nobody may join has no
+    // business being advertised.
+    request.visibility = if new.is_public { Visibility::Public } else { Visibility::Private };
+
+    // An alias is a nickname for the room, not a permission: an invite-only
+    // room can have one, and having one doesn't let anybody in. Who can join is
+    // the join rule, set by the preset above.
+    //
+    // The user types `movies`; tolerate them typing `#movies:server` too.
+    request.room_alias_name = new
+        .alias
+        .map(|a| a.trim().trim_start_matches('#').split(':').next().unwrap_or("").to_owned())
+        .filter(|a| !a.is_empty());
+
+    for user in &new.invite {
+        request.invite.push(matrix_sdk::ruma::UserId::parse(user)?);
+    }
+
+    // Encryption can only ever be turned on here. There is no supported way to
+    // encrypt a room after the fact, and no way at all to undo it.
+    if new.encrypted {
+        request.initial_state = vec![
+            InitialStateEvent::with_empty_state_key(
+                RoomEncryptionEventContent::with_recommended_defaults(),
+            )
+            .to_raw_any(),
+        ];
+    }
+
+    let room = core.client.create_room(request).await?;
+    let room_id = room.room_id().to_owned();
+
+    let space_warning = match new.parent_space {
+        Some(space_id) => add_to_space(core, &space_id, &room_id).await.err().map(|e| {
+            format!("made the room, but couldn't add it to that space — {e}")
+        }),
+        None => None,
+    };
+
+    Ok(NewRoomResult { room_id: room_id.to_string(), space_warning })
+}
+
+/// Record a room as a child of a space, from both ends.
+///
+/// Membership of a space is written twice and neither half is reliable alone —
+/// the trap in ARCHITECTURE.md. The space's `m.space.child` is the half other
+/// clients read, but it's a state event in the *space*, which is frequently
+/// someone else's; the room's own `m.space.parent` is one we can always write,
+/// because we just created the room and hold every power in it.
+///
+/// Writing both is also what makes a new room appear under its space *now*: the
+/// room summary carries `parent_spaces`, which arrives with the room's own
+/// diff, while the space's children list is only re-read on a slow poll.
+///
+/// Best-effort by design. A room that exists but isn't filed is a far better
+/// outcome than a failed creation.
+async fn add_to_space(core: &MatrixCore, space_id: &str, child: &RoomId) -> Result<()> {
+    use matrix_sdk::ruma::events::space::{
+        child::SpaceChildEventContent, parent::SpaceParentEventContent,
+    };
+
+    let space_id = RoomId::parse(space_id)?;
+    let space = core
+        .client
+        .get_room(&space_id)
+        .ok_or_else(|| Error::UnknownRoom(space_id.to_string()))?;
+
+    // `via` is where someone should try to join; the server that just created
+    // the room is the only one that certainly has it.
+    let server = core.own_user_id()?.server_name().to_owned();
+
+    // The child's side first: it always succeeds, so the room is where the user
+    // expects it even when the space rejects us.
+    if let Some(room) = core.client.get_room(child) {
+        let mut parent = SpaceParentEventContent::new(vec![server.clone()]);
+        parent.canonical = true;
+        if let Err(e) = room.send_state_event_for_key(&space_id, parent).await {
+            tracing::warn!("couldn't record the space as this room's parent: {e}");
+        }
+    }
+
+    space.send_state_event_for_key(child, SpaceChildEventContent::new(vec![server])).await?;
+
+    Ok(())
+}
+
+/// Rename a room and/or change its topic. `None` leaves a field alone.
+pub async fn update(
+    core: &MatrixCore,
+    room_id: &RoomId,
+    name: Option<String>,
+    topic: Option<String>,
+) -> Result<()> {
+    let room = core.room(&room_id.to_owned())?;
+
+    if let Some(name) = name {
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            return Err(Error::Other("a room needs a name~".into()));
+        }
+        room.set_name(name).await?;
+    }
+
+    // An empty topic is a real value: it's how you clear one.
+    if let Some(topic) = topic {
+        room.set_room_topic(topic.trim()).await?;
+    }
+
+    Ok(())
+}
+
+/// What this account is allowed to change about a room.
+///
+/// Read once when the room panel opens rather than carried on every summary:
+/// it needs the power-level state event, and the answer only matters for the
+/// room you're looking at.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomPermissions {
+    pub can_rename: bool,
+    pub can_set_topic: bool,
+    pub can_invite: bool,
+}
+
+pub async fn permissions(core: &MatrixCore, room_id: &RoomId) -> Result<RoomPermissions> {
+    use matrix_sdk::ruma::events::StateEventType;
+
+    let room = core.room(&room_id.to_owned())?;
+    let user_id = core.own_user_id()?;
+
+    // `_or_default` rather than a hard error: a room whose power levels we
+    // can't read yet should let the user try and let the server be the
+    // authority, not refuse on a guess.
+    let levels = room.power_levels_or_default().await;
+
+    Ok(RoomPermissions {
+        can_rename: levels.user_can_send_state(&user_id, StateEventType::RoomName),
+        can_set_topic: levels.user_can_send_state(&user_id, StateEventType::RoomTopic),
+        can_invite: levels.user_can_invite(&user_id),
+    })
+}
+
 pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
     let room_id = super::auth::resolve_room(&core.client, alias_or_id).await?;
     let room = core.client.join_room_by_id(&room_id).await?;
     Ok(room.room_id().to_string())
 }
 
-pub async fn leave(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
-    core.room(&room_id.to_owned())?.leave().await?;
+/// Leave a room, and optionally forget it.
+///
+/// Matrix has no delete. Forgetting drops the room from your account entirely —
+/// it stops being listed, and its history is no longer yours to read even if
+/// you're invited back. For a room only you were in, that is as close to
+/// deletion as the protocol gets; for any other room, everyone else's copy
+/// carries on without you. The UI says which of those is happening.
+pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<()> {
+    let room = core.room(&room_id.to_owned())?;
+
+    // Before anything else: stop watching this room. An open timeline is a live
+    // subscriber to the room's event-cache rows, and leaving — forgetting
+    // especially — pulls those rows out from under it. The frontend closes the
+    // timeline when it deselects the room, but that's a different call over a
+    // different channel, so it can't be relied on to have happened first.
+    crate::matrix::timeline::close_all_for_room(core, room_id).await;
+
+    room.leave().await?;
+
+    if forget {
+        // `forget` refuses outright while the room still looks joined, and
+        // `leave` only sends the request — the local state doesn't turn to Left
+        // until the sync carrying that leave comes back. Forgetting straight
+        // afterwards therefore fails, and then the leave lands and the room
+        // reappears in the list with "you left" as its last event, which is
+        // exactly what it looks like from the outside: a room that won't go
+        // away until you forget it twice.
+        if !wait_until_left(&room).await {
+            return Err(Error::Other(
+                "left it, but your server hasn't caught up yet, so it isn't \
+                 forgotten. try again in a moment~"
+                    .into(),
+            ));
+        }
+        room.forget().await?;
+    }
+
     Ok(())
+}
+
+/// Wait for a leave to come back round through sync. `false` on timeout.
+async fn wait_until_left(room: &Room) -> bool {
+    use tokio::time::{Duration, Instant, sleep};
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        if matches!(room.state(), RoomState::Left | RoomState::Banned) {
+            return true;
+        }
+        sleep(Duration::from_millis(150)).await;
+    }
+    false
 }
 
 pub async fn set_typing(core: &MatrixCore, room_id: &RoomId, typing: bool) -> Result<()> {
