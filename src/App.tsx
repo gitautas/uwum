@@ -6,6 +6,7 @@ import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
 import { LoginScreen } from "./components/LoginScreen";
+import { ProfileCard } from "./components/ProfileCard";
 import { RoomInfo } from "./components/RoomInfo";
 import { RoomList } from "./components/RoomList";
 import { SettingsView } from "./components/SettingsView";
@@ -131,6 +132,7 @@ function Shell() {
       {showInfo && activeRoom && <RoomInfo room={activeRoom} />}
 
       <SettingsView />
+      <ProfileCard />
       <VerificationModal />
       <SyncIndicator />
 

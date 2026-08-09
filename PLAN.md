@@ -1,8 +1,11 @@
 # Planned features
 
-Three features, researched but not built. Each section is meant to be enough to
+Two features, researched but not built. Each section is meant to be enough to
 start from cold: the spec, the exact event shapes, the APIs that already exist
 in the version we pin, which files change, and the traps.
+
+The third — extended profiles — is built; what was learned doing it is at the
+bottom.
 
 Read [ARCHITECTURE.md](ARCHITECTURE.md) first — several traps there (the media
 cache, the sanitiser, zustand selectors) are load-bearing for this work.
@@ -201,92 +204,33 @@ this room".
 
 ---
 
-## 3. Profile cover photo and bio
+## 3. Profile cover photo and bio — built
 
-Smallest of the three, and buildable — the endpoint works and there's an
-existing client to interoperate with.
+Kept as a record; the spec above it is what the code implements.
 
-### Spec: MSC4133 extended profiles
+Bio and status use Commet's keys (`chat.commet.profile_bio`, an object with a
+`body`; `chat.commet.profile_status`, a bare string) so a bio written in either
+client shows in the other. Cover photos are `gg.uwu.cover_url` — nothing else
+writes one, so only uwum reads it. Continuwuity implements MSC4133 without
+advertising `uk.tcpip.msc4133`, which is why an earlier capability check
+concluded wrongly: test the endpoint, not the advertisement.
 
-Adds arbitrary key/value fields to a profile:
+Editing is in settings → account. Reading is the profile card, which hangs off
+any avatar in the app (`src/components/ProfileCard.tsx`) and also shows shared
+rooms and a way into a DM.
 
-```
-GET/PUT /_matrix/client/v3/profile/{userId}/{keyName}
-```
+**Shared rooms are two sources unioned**, because neither is complete: MSC2666
+(`/_matrix/client/unstable/uk.half-shot.msc2666/user/mutual_rooms`), which not
+every server implements, plus a local scan with `get_member_no_sync`, which only
+sees rooms whose member list has been loaded. Neither is worth a network round
+trip per room, so an incomplete list is the accepted trade.
 
-Standard-ish keys in the wild: `m.tz` (MSC4175), and free-form ones such as
-`us.cloke.msc4175.tz`. There is **no agreed key for a cover photo or bio** —
-Commet defines its own. Pick namespaced keys and read the common alternatives:
-
-```
-gg.uwu.bio           → string
-gg.uwu.cover_url     → mxc://…
-```
-
-### Checked — supported, but don't trust the capability flag
-
-`unstable_features` on m.uwu.lt does **not** list `uk.tcpip.msc4133`. That is
-not evidence of anything: Continuwuity implements extended profiles without
-advertising the flag. Test the endpoint, not the advertisement.
-
-```bash
-curl -s https://m.uwu.lt/_matrix/client/v3/profile/@user:m.uwu.lt
-```
-
-Returned (2026-08-09):
-
-```json
-{
-  "avatar_url": "mxc://…",
-  "displayname": "Gintas",
-  "chat.commet.profile_bio": { "body": "…" },
-  "chat.commet.profile_status": "vau "
-}
-```
-
-A GET for an unset custom key returns `200 {}` rather than `404
-M_NOT_FOUND` — so treat empty object and absent as the same "not set".
-
-`PUT /_matrix/client/v3/profile/{userId}/{key}` is **untested**; it needs auth,
-so try it early rather than assuming write works because read does.
-
-### Interoperate with Commet, don't invent keys
-
-Commet is already writing these, and it's the client to match:
-
-| field | key | shape |
-|---|---|---|
-| bio | `chat.commet.profile_bio` | `{ "body": "…" }` — an object, not a string |
-| status | `chat.commet.profile_status` | a bare string |
-
-Write Commet's keys so bios show up in both clients. A **cover photo key was
-not observed** — either unset or unsupported there. Check Commet's source before
-choosing; if there's nothing, use `gg.uwu.cover_url` (mxc) and accept that only
-uwum reads it.
-
-### Work
-
-- Rust: `get_profile_field(user_id, key)` / `set_profile_field(key, value)` via
-  `client.send()` with a custom request, since ruma may not model MSC4133 yet.
-- `SettingsView` account section: bio textarea, cover upload, live preview.
-- `RoomInfo` member rows: show bio on a member popout (which doesn't exist yet —
-  a member detail panel is a prerequisite).
-- Cache profile fields; don't refetch per render.
-
-### Trap
-
-Profile fields are **public and federated**. Anyone who can see the user can read
-them. The UI should say so where the bio is edited — people will otherwise
-assume it's room-scoped.
-
----
+Remaining: profile fields are refetched each time a card opens. Fine at this
+size, worth a cache if cards get opened in bulk.
 
 ## Suggested order
 
-1. `upload_image` — needed by all three, and small.
-2. Room backgrounds — self-contained, finishable in one sitting, proves the
-   upload path.
-3. Custom emoji and stickers — the big one, in this order: pack storage →
+1. Room backgrounds — self-contained, finishable in one sitting. The upload it
+   needs already exists as `upload_media`, built for cover photos.
+2. Custom emoji and stickers — the big one, in this order: pack storage →
    picker → sending → reactions → import → autocomplete.
-4. Profile fields — unblocked. Confirm PUT works before building UI, and write
-   Commet's key names so bios interoperate.

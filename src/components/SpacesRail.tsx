@@ -3,7 +3,8 @@ import { useShallow } from "zustand/react/shallow";
 import { accentFor, initialsFor } from "../lib/display";
 import { mediaUrl } from "../lib/ipc";
 import { useStore } from "../store";
-import { Avatar, Icon, PresenceDot } from "./ui";
+import { AvatarButton } from "./ProfileCard";
+import { Icon, PresenceDot } from "./ui";
 
 /**
  * The narrow left rail: the uwu mark, one tile per space, and your own avatar
@@ -116,8 +117,8 @@ export function SpacesRail() {
         </button>
         <div style={{ position: "relative" }}>
           {session && (
-            <Avatar
-              id={session.userId}
+            <AvatarButton
+              userId={session.userId}
               name={session.displayName ?? session.userId}
               mxc={session.avatarUrl}
               size={38}

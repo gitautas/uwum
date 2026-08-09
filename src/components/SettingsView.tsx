@@ -1,15 +1,18 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { open } from "@tauri-apps/plugin-dialog";
+
 import { call } from "../lib/call";
 import * as ipc from "../lib/ipc";
+import { mediaUrl } from "../lib/ipc";
 import {
   ACCENT_SWATCHES,
   listMediaDevices,
   type Accent,
   type AudioDevice,
 } from "../lib/settings";
-import type { DeviceInfo, RecoveryStatus } from "../lib/types";
+import type { DeviceInfo, Profile, RecoveryStatus } from "../lib/types";
 import { useStore } from "../store";
 import { Avatar, Button, Icon, RaveLabel, Spinner } from "./ui";
 
@@ -355,6 +358,9 @@ function AccountSection() {
         <Row title="this device" subtitle={session.deviceId} />
       </Card>
 
+      <Heading>profile</Heading>
+      <ProfileEditor />
+
       {session.insecureStorage && (
         <Card tone="warning">
           <div style={{ display: "flex", gap: 12 }}>
@@ -404,6 +410,184 @@ function AccountSection() {
         )}
       </Card>
     </>
+  );
+}
+
+/**
+ * Bio, status and cover photo — MSC4133 extended profile fields.
+ *
+ * Bio and status use Commet's keys so the two clients show the same thing;
+ * `set_profile` handles the shape difference. Everything here is public and
+ * federated, which the UI says rather than assuming people know.
+ */
+function ProfileEditor() {
+  const showBanner = useStore((s) => s.showBanner);
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [bio, setBio] = useState("");
+  const [status, setStatus] = useState("");
+  const [coverUrl, setCoverUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    ipc
+      .getProfile()
+      .then((p) => {
+        if (cancelled) return;
+        setProfile(p);
+        setBio(p.bio ?? "");
+        setStatus(p.status ?? "");
+        setCoverUrl(p.coverUrl ?? "");
+      })
+      .catch((e) => {
+        if (!cancelled) showBanner("error", ipc.asUwuError(e).message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showBanner]);
+
+  const dirty =
+    profile !== null &&
+    (bio !== (profile.bio ?? "") ||
+      status !== (profile.status ?? "") ||
+      coverUrl !== (profile.coverUrl ?? ""));
+
+  async function pickCover() {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "image", extensions: ["png", "jpg", "jpeg", "gif", "webp"] }],
+      });
+      if (typeof selected !== "string") return;
+      setBusy(true);
+      setCoverUrl(await ipc.uploadMedia(selected));
+    } catch (e) {
+      showBanner("error", ipc.asUwuError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    setSaved(false);
+    try {
+      // Only send what changed; a field left alone stays alone server-side.
+      await ipc.setProfile({
+        ...(bio !== (profile?.bio ?? "") ? { bio } : {}),
+        ...(status !== (profile?.status ?? "") ? { status } : {}),
+        ...(coverUrl !== (profile?.coverUrl ?? "") ? { coverUrl } : {}),
+      });
+      setProfile(await ipc.getProfile());
+      setSaved(true);
+    } catch (e) {
+      showBanner("error", ipc.asUwuError(e).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!profile) {
+    return (
+      <Card>
+        <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+          <Spinner />
+        </div>
+      </Card>
+    );
+  }
+
+  const coverPreview = mediaUrl(coverUrl, { width: 560, height: 140 });
+
+  return (
+    <Card>
+      <Field label="cover photo" hint="shown behind your avatar on your profile card.">
+        <div
+          style={{
+            height: 96,
+            borderRadius: 16,
+            marginBottom: 10,
+            border: "1px solid var(--border-subtle)",
+            background: coverPreview
+              ? `center/cover no-repeat url("${coverPreview}")`
+              : "var(--surface-inset)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--text-tertiary)",
+            fontSize: 12.5,
+          }}
+        >
+          {!coverPreview && "no cover yet"}
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => void pickCover()}>
+            choose an image
+          </Button>
+          {coverUrl && (
+            <Button size="sm" variant="ghost" disabled={busy} onClick={() => setCoverUrl("")}>
+              remove
+            </Button>
+          )}
+        </div>
+      </Field>
+
+      <Field label="status" hint="a short line — what you're up to.">
+        <input
+          className="selectable"
+          value={status}
+          maxLength={120}
+          onChange={(e) => setStatus(e.target.value)}
+          placeholder="vibing~"
+          style={inputStyle}
+        />
+      </Field>
+
+      <Field label="bio">
+        <textarea
+          className="selectable"
+          value={bio}
+          rows={4}
+          maxLength={1000}
+          onChange={(e) => setBio(e.target.value)}
+          placeholder="say something about yourself~"
+          style={{ ...inputStyle, resize: "vertical", lineHeight: 1.55 }}
+        />
+      </Field>
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginTop: 4,
+        }}
+      >
+        <Button disabled={!dirty || busy} onClick={() => void save()}>
+          save
+        </Button>
+        {busy && <Spinner size={14} />}
+        {saved && !dirty && (
+          <span style={{ fontSize: 12.5, color: "var(--accent-primary)" }}>saved~</span>
+        )}
+        <span
+          style={{
+            marginLeft: "auto",
+            fontSize: 11.5,
+            color: "var(--text-tertiary)",
+            textAlign: "right",
+            lineHeight: 1.45,
+          }}
+        >
+          public and federated — anyone
+          <br />
+          who can see you can read this
+        </span>
+      </div>
+    </Card>
   );
 }
 

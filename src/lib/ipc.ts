@@ -13,6 +13,8 @@ import type {
   CallParticipants,
   DeviceInfo,
   Diff,
+  Profile,
+  ProfileUpdate,
   HomeserverInfo,
   RecoveryStatus,
   RoomMember,
@@ -25,6 +27,7 @@ import type {
   TimelineItem,
   TimelineUpdate,
   TypingUpdate,
+  UserContext,
   UwuError,
   VerificationRequestInfo,
 } from "./types";
@@ -217,9 +220,29 @@ export function mediaUrl(
 
   // Ask for 2× so the image stays sharp on retina displays.
   const scale = Math.min(window.devicePixelRatio || 1, 2);
-  const w = Math.round(size.width * scale);
-  const h = Math.round(size.height * scale);
+  const w = snapUp(size.width * scale);
+  const h = snapUp(size.height * scale);
   return `${base}?w=${w}&h=${h}`;
+}
+
+/** The only thumbnail sizes we ever ask a homeserver for. */
+const THUMBNAIL_STEPS = [32, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048];
+
+/**
+ * Round a requested dimension up to the next standard step.
+ *
+ * The size is part of the URL, so it's also the cache key — in the WebView, in
+ * the SDK's media store, and on the homeserver. Asking for 68px in one place
+ * and 76px in another means the same avatar is fetched twice and cached twice,
+ * and for *remote* media each miss is a federation round trip that can take
+ * seconds or fail outright. A dozen buckets is plenty of sharpness and turns
+ * every avatar in the app into one shared fetch.
+ */
+function snapUp(value: number): number {
+  return (
+    THUMBNAIL_STEPS.find((step) => step >= value) ??
+    THUMBNAIL_STEPS[THUMBNAIL_STEPS.length - 1]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -240,6 +263,22 @@ export const mismatchVerification = (userId: string, flowId: string) =>
 
 export const cancelVerification = (userId: string, flowId: string) =>
   invoke<void>("cancel_verification", { userId, flowId });
+
+export const getProfile = (userId?: string) =>
+  invoke<Profile>("get_profile", { userId: userId ?? null });
+
+export const setProfile = (update: ProfileUpdate) =>
+  invoke<void>("set_profile", { update });
+
+/** Verification, shared rooms and any existing DM — our side of a profile. */
+export const getUserContext = (userId: string) =>
+  invoke<UserContext>("get_user_context", { userId });
+
+/** The DM with this person, created if there isn't one yet. */
+export const openDm = (userId: string) => invoke<string>("open_dm", { userId });
+
+/** Upload a local file to the media repo, returning its `mxc://` URI. */
+export const uploadMedia = (path: string) => invoke<string>("upload_media", { path });
 
 export const getOwnDevices = () => invoke<DeviceInfo[]>("get_own_devices");
 

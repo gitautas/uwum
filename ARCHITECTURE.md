@@ -106,6 +106,27 @@ Media elements are handed to AVFoundation, which never consults a
 (`src/lib/blobMedia.ts`). A blob typed `application/octet-stream` won't play
 either, so the container is sniffed from the bytes.
 
+### A thumbnail size is a cache key, and remote thumbnails fail slowly
+
+`?w=&h=` goes into the URL, so every distinct pixel size is a separate entry in
+the WebView cache, the SDK's media store *and* the homeserver's. Two components
+drawing the same avatar at 34px and 66px fetch it twice. That's merely wasteful
+for local media — but for *remote* media the server has to federate the original
+before it can resize, and when that federation stalls the request sits for the
+server's full timeout (ten seconds on Continuwuity) and comes back
+`400 M_UNKNOWN` from the thumbnail endpoint, which reads like a client bug and
+isn't one.
+
+Four things keep it bearable. `Avatar` asks for one fixed size whatever it draws
+at, so a person's picture is a single fetch app-wide and CSS does the scaling —
+the profile card at 66px and the timeline at 38px share one cache entry.
+`mediaUrl` snaps everything else up to one of a dozen standard buckets. A failed
+thumbnail retries as the whole file, which often works because only the resize
+needed the original. And a failed request is remembered for a minute so
+re-renders fail instantly instead of queueing more ten-second waits — keyed by
+URI *and size*, because "this size failed" is not "this media is unavailable",
+and keying on the URI alone blanks avatars that were rendering fine.
+
 ### Encrypted attachments need the event's `MediaSource`, not just the URI
 
 The keys live in the event; rebuilding a `MediaSource::Plain` from the `mxc://`
