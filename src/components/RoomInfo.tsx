@@ -5,11 +5,12 @@ import * as ipc from "../lib/ipc";
 import type { RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
-import { Avatar, Icon, RaveLabel, Spinner } from "./ui";
+import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
 
 export function RoomInfo({ room }: { room: RoomSummary }) {
   const [members, setMembers] = useState<RoomMember[] | null>(null);
   const showBanner = useStore((s) => s.showBanner);
+  const openLightbox = useStore((s) => s.openLightbox);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +52,16 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
       }}
     >
       <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-        <div style={{ display: "inline-block", transform: "rotate(-3deg)" }}>
+        <button
+          onClick={() => room.avatarUrl && openLightbox(room.avatarUrl, room.name)}
+          aria-label={`${room.name}'s picture, full size`}
+          style={{
+            display: "inline-block",
+            padding: 0,
+            transform: "rotate(-3deg)",
+            cursor: room.avatarUrl ? "zoom-in" : "default",
+          }}
+        >
           <Avatar
             id={room.id}
             name={room.name}
@@ -60,7 +70,7 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
             radius={26}
             fontSize={26}
           />
-        </div>
+        </button>
         <div
           style={{
             fontFamily: "var(--font-display)",
@@ -114,20 +124,22 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
       ))}
 
       <RaveLabel style={{ padding: "18px 4px 8px" }}>room</RaveLabel>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <ToggleRow
+      <div style={{ display: "flex", gap: 8 }}>
+        <IconToggle
           icon="bell-slash"
           label="mute notifications"
           on={room.isMuted}
+          colour="var(--status-warning)"
           onToggle={(next) => void ipc.setRoomMuted(room.id, next).catch(() => {})}
         />
-        <ToggleRow
+        <IconToggle
           icon="star"
           label="favourite"
           on={room.isFavourite}
+          colour="var(--accent-secondary)"
           onToggle={(next) => void ipc.setRoomFavourite(room.id, next).catch(() => {})}
         />
-        <ToggleRow
+        <IconToggle
           icon="arrow-down"
           label="low priority"
           on={room.isLowPriority}
@@ -303,76 +315,5 @@ function MemberRow({ member }: { member: RoomMember }) {
         </button>
       )}
     </div>
-  );
-}
-
-function ToggleRow({
-  icon,
-  label,
-  on,
-  onToggle,
-}: {
-  icon: string;
-  label: string;
-  on: boolean;
-  onToggle: (next: boolean) => void;
-}) {
-  return (
-    <button
-      onClick={() => onToggle(!on)}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-        background: "var(--surface-card)",
-        border: "1px solid var(--border-subtle)",
-        borderRadius: 16,
-        padding: "11px 13px",
-        cursor: "pointer",
-        textAlign: "left",
-        width: "100%",
-      }}
-    >
-      <Icon
-        name={icon}
-        size={16}
-        color={on ? "var(--accent-primary)" : "var(--text-tertiary)"}
-      />
-      <span
-        style={{
-          flex: 1,
-          fontFamily: "var(--font-display)",
-          fontWeight: 700,
-          fontSize: 13,
-          color: on ? "var(--text-primary)" : "var(--text-secondary)",
-        }}
-      >
-        {label}
-      </span>
-      <div
-        style={{
-          width: 30,
-          height: 17,
-          borderRadius: 999,
-          background: on ? "var(--accent-primary)" : "var(--surface-inset)",
-          border: "1px solid var(--border-subtle)",
-          position: "relative",
-          transition: "background var(--dur-fast) var(--ease-out)",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            top: 1,
-            left: on ? 14 : 1,
-            width: 13,
-            height: 13,
-            borderRadius: "50%",
-            background: on ? "var(--ink-950)" : "var(--text-tertiary)",
-            transition: "left var(--dur-fast) var(--ease-bounce)",
-          }}
-        />
-      </div>
-    </button>
   );
 }

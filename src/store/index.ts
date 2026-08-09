@@ -78,6 +78,8 @@ interface State {
    * second one closes the first without either knowing about the other.
    */
   profileCard: { userId: string; anchor: DOMRect } | null;
+  /** The picture being looked at full-size, if any. */
+  lightbox: { mxc: string; name: string } | null;
 
   /** Machine-local preferences, persisted outside the account. */
   settings: prefs.Settings;
@@ -110,6 +112,8 @@ interface Actions {
   /** Clicking the same avatar again closes the card, like every other popover. */
   toggleProfile(userId: string, anchor: DOMRect): void;
   closeProfile(): void;
+  openLightbox(mxc: string, name: string): void;
+  closeLightbox(): void;
   updateSettings(patch: Partial<prefs.Settings>): void;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
@@ -148,6 +152,7 @@ const initial: State = {
   showInfo: prefs.load().showInfoPanel,
   showSettings: false,
   profileCard: null,
+  lightbox: null,
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
@@ -236,6 +241,9 @@ export const useStore = create<State & Actions>((set, get) => ({
       profileCard: s.profileCard?.userId === userId ? null : { userId, anchor },
     })),
   closeProfile: () => set({ profileCard: null }),
+
+  openLightbox: (mxc, name) => set({ lightbox: { mxc, name } }),
+  closeLightbox: () => set({ lightbox: null }),
 
   updateSettings: (patch) =>
     set((s) => {

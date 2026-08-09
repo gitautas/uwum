@@ -208,6 +208,115 @@ export function PresenceDot({
   );
 }
 
+/**
+ * A switch. Lives here rather than in a view because there used to be two of
+ * these, drawn differently, in two files.
+ */
+export function Toggle({
+  on,
+  onToggle,
+  label,
+}: {
+  on: boolean;
+  onToggle: (next: boolean) => void;
+  label?: string;
+}) {
+  return (
+    <button
+      onClick={() => onToggle(!on)}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      style={{
+        width: 38,
+        height: 22,
+        flex: "none",
+        borderRadius: 999,
+        background: on ? "var(--accent-primary)" : "var(--surface-inset)",
+        border: "1px solid var(--border-subtle)",
+        position: "relative",
+        cursor: "pointer",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 2,
+          left: on ? 18 : 2,
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          background: on ? "var(--ink-950)" : "var(--text-tertiary)",
+          transition: "left var(--dur-fast) var(--ease-bounce)",
+        }}
+      />
+    </button>
+  );
+}
+
+/**
+ * A boolean as a single icon button — on is filled and coloured, off is a
+ * hairline outline.
+ *
+ * For settings whose *name* is obvious from the glyph (mute, favourite) and
+ * which would otherwise cost a full row each. The label is still there for
+ * screen readers and as a tooltip; if a setting needs prose to be understood,
+ * it wants `Toggle` and a row instead.
+ */
+export function IconToggle({
+  icon,
+  label,
+  on,
+  colour = "var(--accent-primary)",
+  onToggle,
+}: {
+  icon: string;
+  label: string;
+  on: boolean;
+  colour?: string;
+  onToggle: (next: boolean) => void;
+}) {
+  return (
+    <button
+      onClick={() => onToggle(!on)}
+      title={label}
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      style={{
+        flex: 1,
+        height: 42,
+        borderRadius: 16,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        transition: "transform var(--dur-fast) var(--ease-bounce)",
+        ...(on
+          ? {
+              background: `color-mix(in srgb, ${colour} 16%, transparent)`,
+              border: `1px solid ${colour}`,
+            }
+          : {
+              background: "var(--surface-card)",
+              border: "1px solid var(--border-subtle)",
+            }),
+      }}
+      onMouseDown={(e) => {
+        e.currentTarget.style.transform = "translateY(1px)";
+      }}
+      onMouseUp={(e) => {
+        e.currentTarget.style.transform = "";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.transform = "";
+      }}
+    >
+      <Icon name={icon} size={17} color={on ? colour : "var(--text-tertiary)"} />
+    </button>
+  );
+}
+
 /** The uppercase, letter-spaced section label used throughout the design. */
 export function RaveLabel({
   children,

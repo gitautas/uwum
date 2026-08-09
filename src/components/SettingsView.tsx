@@ -14,7 +14,7 @@ import {
 } from "../lib/settings";
 import type { DeviceInfo, Profile, RecoveryStatus } from "../lib/types";
 import { useStore } from "../store";
-import { Avatar, Button, Icon, RaveLabel, Spinner } from "./ui";
+import { Avatar, Button, Icon, RaveLabel, Spinner, Toggle } from "./ui";
 
 type Section = "account" | "security" | "voice" | "appearance" | "about";
 
@@ -266,37 +266,6 @@ function Row({
       </div>
       {children}
     </div>
-  );
-}
-
-function Toggle({ on, onToggle }: { on: boolean; onToggle: (next: boolean) => void }) {
-  return (
-    <button
-      onClick={() => onToggle(!on)}
-      style={{
-        width: 38,
-        height: 22,
-        flex: "none",
-        borderRadius: 999,
-        background: on ? "var(--accent-primary)" : "var(--surface-inset)",
-        border: "1px solid var(--border-subtle)",
-        position: "relative",
-        cursor: "pointer",
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          top: 2,
-          left: on ? 18 : 2,
-          width: 16,
-          height: 16,
-          borderRadius: "50%",
-          background: on ? "var(--ink-950)" : "var(--text-tertiary)",
-          transition: "left var(--dur-fast) var(--ease-bounce)",
-        }}
-      />
-    </button>
   );
 }
 

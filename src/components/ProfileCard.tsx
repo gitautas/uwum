@@ -97,6 +97,7 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
 
   const closeProfile = useStore((s) => s.closeProfile);
   const openSettings = useStore((s) => s.openSettings);
+  const openLightbox = useStore((s) => s.openLightbox);
   const selectRoom = useStore((s) => s.selectRoom);
   const showBanner = useStore((s) => s.showBanner);
 
@@ -193,8 +194,12 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
       }}
     >
       <div
+        onClick={() =>
+          profile?.coverUrl && openLightbox(profile.coverUrl, `${name}'s cover`)
+        }
         style={{
           height: 88,
+          cursor: profile?.coverUrl ? "zoom-in" : "default",
           background: cover
             ? `center/cover no-repeat url("${cover}")`
             : accentFor(userId),
@@ -211,14 +216,26 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
             justifyContent: "space-between",
           }}
         >
-          <Avatar
-            id={userId}
-            name={name}
-            mxc={profile?.avatarUrl}
-            size={66}
-            radius={22}
-            style={{ border: "3px solid var(--surface-card-raised)" }}
-          />
+          <button
+            onClick={() =>
+              profile?.avatarUrl && openLightbox(profile.avatarUrl, name)
+            }
+            aria-label={`${name}'s picture, full size`}
+            style={{
+              display: "flex",
+              padding: 0,
+              cursor: profile?.avatarUrl ? "zoom-in" : "default",
+            }}
+          >
+            <Avatar
+              id={userId}
+              name={name}
+              mxc={profile?.avatarUrl}
+              size={66}
+              radius={22}
+              style={{ border: "3px solid var(--surface-card-raised)" }}
+            />
+          </button>
           {verified && <Tag icon="seal-check">verified</Tag>}
         </div>
 

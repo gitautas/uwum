@@ -6,6 +6,7 @@ import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
 import { DropZone } from "./components/DropZone";
+import { Lightbox } from "./components/Lightbox";
 import { LoginScreen } from "./components/LoginScreen";
 import { ProfileCard } from "./components/ProfileCard";
 import { RoomInfo } from "./components/RoomInfo";
@@ -136,6 +137,7 @@ function Shell() {
       <SettingsView />
       <ProfileCard />
       <DropZone />
+      <Lightbox />
       <VerificationModal />
       <SyncIndicator />
 
