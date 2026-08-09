@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  macOS refuses microphone access outright — and `enumerateDevices` returns
+	  nothing — unless the app declares why it wants it. Without this key the
+	  voice settings show no devices and calls silently fail to publish audio.
+	-->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>uwum needs your microphone so people can hear you on voice calls.</string>
+
+	<!-- Reserved for video calls; harmless until then, and avoids a rebuild. -->
+	<key>NSCameraUsageDescription</key>
+	<string>uwum needs your camera for video calls.</string>
+
+	<!-- Local network access, for reaching a LiveKit server on your own LAN. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>uwum needs local network access to reach a voice server on your network.</string>
+</dict>
+</plist>
