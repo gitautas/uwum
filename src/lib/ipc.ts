@@ -13,6 +13,8 @@ import type {
   CallParticipants,
   DeviceInfo,
   Diff,
+  Profile,
+  ProfileUpdate,
   HomeserverInfo,
   RecoveryStatus,
   RoomMember,
@@ -240,6 +242,15 @@ export const mismatchVerification = (userId: string, flowId: string) =>
 
 export const cancelVerification = (userId: string, flowId: string) =>
   invoke<void>("cancel_verification", { userId, flowId });
+
+export const getProfile = (userId?: string) =>
+  invoke<Profile>("get_profile", { userId: userId ?? null });
+
+export const setProfile = (update: ProfileUpdate) =>
+  invoke<void>("set_profile", { update });
+
+/** Upload a local file to the media repo, returning its `mxc://` URI. */
+export const uploadMedia = (path: string) => invoke<string>("upload_media", { path });
 
 export const getOwnDevices = () => invoke<DeviceInfo[]>("get_own_devices");
 

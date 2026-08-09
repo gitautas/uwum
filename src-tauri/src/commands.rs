@@ -12,7 +12,7 @@ use crate::{
         TimelineItemDto,
     },
     error::{Error, Result},
-    matrix::{auth, core::AppState, media, rooms, timeline},
+    matrix::{auth, core::AppState, media, profile, rooms, timeline},
     rtc, verification,
 };
 
@@ -341,6 +341,31 @@ pub async fn get_media_bytes(
 ) -> Result<tauri::ipc::Response> {
     let media = media::fetch(&state.core().await?.client, &mxc, None, None).await?;
     Ok(tauri::ipc::Response::new(media.bytes))
+}
+
+// ---------------------------------------------------------------------------
+// profile
+// ---------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn get_profile(
+    state: State<'_, AppState>,
+    user_id: Option<String>,
+) -> Result<profile::ProfileDto> {
+    profile::get_profile(&*state.core().await?, user_id).await
+}
+
+#[tauri::command]
+pub async fn set_profile(
+    state: State<'_, AppState>,
+    update: profile::ProfileUpdate,
+) -> Result<()> {
+    profile::set_profile(&*state.core().await?, update).await
+}
+
+#[tauri::command]
+pub async fn upload_media(state: State<'_, AppState>, path: String) -> Result<String> {
+    profile::upload_media(&*state.core().await?, &path).await
 }
 
 #[tauri::command]

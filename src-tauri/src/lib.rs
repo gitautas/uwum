@@ -60,6 +60,9 @@ pub fn run() {
             commands::get_pinned_events,
             commands::get_event_body,
             // media
+            commands::get_profile,
+            commands::set_profile,
+            commands::upload_media,
             commands::get_media_bytes,
             commands::save_media,
             // verification

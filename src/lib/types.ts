@@ -282,6 +282,25 @@ export function isSasUpdate(
   return "emoji" in update;
 }
 
+export interface Profile {
+  userId: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  /** Commet's `chat.commet.profile_bio`, unwrapped from its `body` object. */
+  bio: string | null;
+  /** Commet's `chat.commet.profile_status`. */
+  status: string | null;
+  /** `gg.uwu.cover_url` — ours; no other client reads it. */
+  coverUrl: string | null;
+}
+
+/** A partial update: omit a field to leave it, pass "" to clear it. */
+export interface ProfileUpdate {
+  bio?: string;
+  status?: string;
+  coverUrl?: string;
+}
+
 export interface DeviceInfo {
   deviceId: string;
   displayName: string | null;
