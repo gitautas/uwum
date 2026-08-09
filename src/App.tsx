@@ -5,6 +5,7 @@ import * as ipc from "./lib/ipc";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
+import { CreateRoom } from "./components/CreateRoom";
 import { DropZone } from "./components/DropZone";
 import { Lightbox } from "./components/Lightbox";
 import { LoginScreen } from "./components/LoginScreen";
@@ -138,6 +139,7 @@ function Shell() {
       <ProfileCard />
       <DropZone />
       <Lightbox />
+      <CreateRoom />
       <VerificationModal />
       <SyncIndicator />
 

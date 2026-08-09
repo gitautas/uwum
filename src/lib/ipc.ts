@@ -16,6 +16,8 @@ import type {
   Profile,
   ProfileUpdate,
   HomeserverInfo,
+  NewRoom,
+  NewRoomResult,
   RecoveryStatus,
   RoomMember,
   RoomSummary,
@@ -81,6 +83,10 @@ export const getSpaces = () => invoke<SpaceSummary[]>("get_spaces");
 
 export const getMembers = (roomId: string) =>
   invoke<RoomMember[]>("get_members", { roomId });
+
+/** Make a room. Returns its ID, plus a warning if filing it under a space failed. */
+export const createRoom = (room: NewRoom) =>
+  invoke<NewRoomResult>("create_room", { room });
 
 export const joinRoom = (aliasOrId: string) =>
   invoke<string>("join_room", { aliasOrId });

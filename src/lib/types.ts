@@ -86,6 +86,26 @@ export interface RoomSummary {
   isVideoRoom: boolean;
 }
 
+/** What the create-room dialog collects. */
+export interface NewRoom {
+  name: string;
+  topic?: string;
+  /** Anyone can find and join it, and it's listed in the directory. */
+  isPublic?: boolean;
+  /** Alias localpart for a public room — `movies`, not `#movies:server`. */
+  alias?: string;
+  encrypted?: boolean;
+  invite?: string[];
+  /** The space to file it under, if one was open. */
+  parentSpace?: string | null;
+}
+
+export interface NewRoomResult {
+  roomId: string;
+  /** The room was made but couldn't be filed under the space. Not an error. */
+  spaceWarning: string | null;
+}
+
 export interface SpaceSummary {
   id: string;
   name: string;

@@ -447,6 +447,120 @@ async fn space_children(space: &Room) -> Vec<String> {
 // room actions
 // ---------------------------------------------------------------------------
 
+/// What the create-room dialog collects.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRoom {
+    pub name: String,
+    #[serde(default)]
+    pub topic: Option<String>,
+    /// Anyone can find and join it, and it gets listed in the directory.
+    #[serde(default)]
+    pub is_public: bool,
+    /// Alias localpart for a public room — `movies`, not `#movies:server`.
+    #[serde(default)]
+    pub alias: Option<String>,
+    #[serde(default)]
+    pub encrypted: bool,
+    #[serde(default)]
+    pub invite: Vec<String>,
+    /// The space to file it under, if one was open when the user hit create.
+    #[serde(default)]
+    pub parent_space: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewRoomResult {
+    pub room_id: String,
+    /// The room exists, but it couldn't be filed under the space. Not an error:
+    /// the room is real and usable, it's just loose.
+    pub space_warning: Option<String>,
+}
+
+/// Create a room, and file it under a space if one was open.
+pub async fn create(core: &MatrixCore, new: NewRoom) -> Result<NewRoomResult> {
+    use matrix_sdk::ruma::{
+        api::client::room::{Visibility, create_room},
+        events::{InitialStateEvent, room::encryption::RoomEncryptionEventContent},
+    };
+
+    let name = new.name.trim();
+    if name.is_empty() {
+        return Err(Error::Other("give it a name first~".into()));
+    }
+
+    let mut request = create_room::v3::Request::new();
+    request.name = Some(name.to_owned());
+    request.topic = new.topic.map(|t| t.trim().to_owned()).filter(|t| !t.is_empty());
+
+    request.preset = Some(if new.is_public {
+        create_room::v3::RoomPreset::PublicChat
+    } else {
+        create_room::v3::RoomPreset::PrivateChat
+    });
+    // Directory listing follows the join rule: a room nobody may join has no
+    // business being advertised.
+    request.visibility = if new.is_public { Visibility::Public } else { Visibility::Private };
+
+    if new.is_public {
+        // The user types `movies`; tolerate them typing `#movies:server` too.
+        request.room_alias_name = new
+            .alias
+            .map(|a| a.trim().trim_start_matches('#').split(':').next().unwrap_or("").to_owned())
+            .filter(|a| !a.is_empty());
+    }
+
+    for user in &new.invite {
+        request.invite.push(matrix_sdk::ruma::UserId::parse(user)?);
+    }
+
+    // Encryption can only ever be turned on here. There is no supported way to
+    // encrypt a room after the fact, and no way at all to undo it.
+    if new.encrypted {
+        request.initial_state = vec![
+            InitialStateEvent::with_empty_state_key(
+                RoomEncryptionEventContent::with_recommended_defaults(),
+            )
+            .to_raw_any(),
+        ];
+    }
+
+    let room = core.client.create_room(request).await?;
+    let room_id = room.room_id().to_owned();
+
+    let space_warning = match new.parent_space {
+        Some(space_id) => add_to_space(core, &space_id, &room_id).await.err().map(|e| {
+            format!("made the room, but couldn't add it to that space — {e}")
+        }),
+        None => None,
+    };
+
+    Ok(NewRoomResult { room_id: room_id.to_string(), space_warning })
+}
+
+/// Record a room as a child of a space.
+///
+/// Best-effort by design: adding the child is a state event in the *space*, and
+/// plenty of spaces are someone else's. A room that exists but isn't filed is a
+/// far better outcome than a failed creation.
+async fn add_to_space(core: &MatrixCore, space_id: &str, child: &RoomId) -> Result<()> {
+    use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
+
+    let space_id = RoomId::parse(space_id)?;
+    let space = core
+        .client
+        .get_room(&space_id)
+        .ok_or_else(|| Error::UnknownRoom(space_id.to_string()))?;
+
+    // `via` is where someone should try to join the child; the server that just
+    // created it is the only one that certainly has it.
+    let via = vec![core.own_user_id()?.server_name().to_owned()];
+    space.send_state_event_for_key(child, SpaceChildEventContent::new(via)).await?;
+
+    Ok(())
+}
+
 pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
     let room_id = super::auth::resolve_room(&core.client, alias_or_id).await?;
     let room = core.client.join_room_by_id(&room_id).await?;

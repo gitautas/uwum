@@ -38,6 +38,7 @@ pub fn run() {
             commands::get_rooms,
             commands::get_spaces,
             commands::get_members,
+            commands::create_room,
             commands::join_room,
             commands::leave_room,
             commands::invite_user,

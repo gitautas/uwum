@@ -112,6 +112,15 @@ pub async fn get_members(
     rooms::members(&*state.core().await?, &parse_room_id(&room_id)?).await
 }
 
+/// Make a room, optionally filing it under the space that's open.
+#[tauri::command]
+pub async fn create_room(
+    state: State<'_, AppState>,
+    room: rooms::NewRoom,
+) -> Result<rooms::NewRoomResult> {
+    rooms::create(&*state.core().await?, room).await
+}
+
 #[tauri::command]
 pub async fn join_room(state: State<'_, AppState>, alias_or_id: String) -> Result<String> {
     rooms::join(&*state.core().await?, &alias_or_id).await

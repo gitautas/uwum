@@ -10,7 +10,7 @@ import {
   useStore,
   type RoomFilter,
 } from "../store";
-import { Avatar, ChannelBadge, HoverRow, Icon } from "./ui";
+import { Avatar, Button, ChannelBadge, HoverRow, Icon } from "./ui";
 
 const FILTERS: RoomFilter[] = ["all", "unread", "dms", "muted"];
 
@@ -25,6 +25,7 @@ export function RoomList() {
     setFilter,
     setSearch,
     selectRoom,
+    openCreateRoom,
   } = useStore(
     useShallow((s) => ({
       allRooms: s.rooms,
@@ -36,6 +37,7 @@ export function RoomList() {
       setFilter: s.setFilter,
       setSearch: s.setSearch,
       selectRoom: s.selectRoom,
+      openCreateRoom: s.openCreateRoom,
     })),
   );
 
@@ -93,16 +95,47 @@ export function RoomList() {
           >
             {heading}~
           </div>
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              whiteSpace: "nowrap",
-            }}
+          <div
+            className="uwu-no-drag"
+            style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
-            {unreadTotal > 0 ? `${unreadTotal} unread` : "all caught up"}
-          </span>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {unreadTotal > 0 ? `${unreadTotal} unread` : "all caught up"}
+            </span>
+            <button
+              onClick={openCreateRoom}
+              title="make or join a room"
+              aria-label="make or join a room"
+              style={{
+                width: 26,
+                height: 26,
+                flex: "none",
+                borderRadius: 999,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                background: "var(--surface-card)",
+                border: "1px solid var(--border-default)",
+                transition: "transform var(--dur-fast) var(--ease-bounce)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = "rotate(90deg)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = "";
+              }}
+            >
+              <Icon name="plus" size={13} color="var(--text-secondary)" />
+            </button>
+          </div>
         </div>
 
         <div
@@ -226,11 +259,26 @@ export function RoomList() {
               lineHeight: 1.6,
             }}
           >
-            {search
-              ? "nothing matches that~"
-              : filter !== "all"
-                ? `no ${filter} rooms right now`
-                : "no rooms yet — join one to get started"}
+            {search ? (
+              "nothing matches that~"
+            ) : filter !== "all" ? (
+              `no ${filter} rooms right now`
+            ) : (
+              <>
+                <div>
+                  {activeSpaceId
+                    ? "nothing here yet — this space has no rooms you've joined"
+                    : "no rooms yet~"}
+                </div>
+                {/* This used to say "join one to get started" and then offer no
+                    way to do it. */}
+                <div style={{ marginTop: 14 }}>
+                  <Button size="sm" onClick={openCreateRoom}>
+                    make or join a room
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         )}
 

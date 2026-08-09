@@ -80,6 +80,7 @@ interface State {
   profileCard: { userId: string; anchor: DOMRect } | null;
   /** The picture being looked at full-size, if any. */
   lightbox: { mxc: string; name: string } | null;
+  showCreateRoom: boolean;
 
   /** Machine-local preferences, persisted outside the account. */
   settings: prefs.Settings;
@@ -114,6 +115,8 @@ interface Actions {
   closeProfile(): void;
   openLightbox(mxc: string, name: string): void;
   closeLightbox(): void;
+  openCreateRoom(): void;
+  closeCreateRoom(): void;
   updateSettings(patch: Partial<prefs.Settings>): void;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
@@ -153,6 +156,7 @@ const initial: State = {
   showSettings: false,
   profileCard: null,
   lightbox: null,
+  showCreateRoom: false,
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
@@ -244,6 +248,9 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   openLightbox: (mxc, name) => set({ lightbox: { mxc, name } }),
   closeLightbox: () => set({ lightbox: null }),
+
+  openCreateRoom: () => set({ showCreateRoom: true }),
+  closeCreateRoom: () => set({ showCreateRoom: false }),
 
   updateSettings: (patch) =>
     set((s) => {
