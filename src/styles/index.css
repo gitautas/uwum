@@ -1,0 +1,9 @@
+/* Our own layers. Vendor CSS (fonts, icons) is imported from `main.tsx`, which
+   resolves package paths through node resolution rather than postcss-import. */
+@import "./tokens/colors.css";
+@import "./tokens/typography.css";
+@import "./tokens/spacing.css";
+@import "./tokens/effects.css";
+@import "./tokens/patterns.css";
+@import "./base.css";
+@import "./app.css";

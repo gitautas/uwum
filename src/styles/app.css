@@ -1,0 +1,97 @@
+/* uwum app shell — global rules lifted from the design's <helmet> block,
+   plus the handful of utilities the React components share. */
+
+html,
+body,
+#root {
+  margin: 0;
+  height: 100%;
+  background: var(--surface-app);
+}
+
+body {
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* the whole window is a chat app, not a document — no accidental text drag */
+  user-select: none;
+  cursor: default;
+}
+
+a {
+  color: var(--accent-quaternary);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--cyan-400);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.13);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+input,
+textarea,
+button {
+  font-family: var(--font-body);
+}
+
+button {
+  border: none;
+  background: none;
+  color: inherit;
+}
+
+@keyframes uwuPulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes uwuSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ---- utilities ------------------------------------------------------- */
+
+/* Anything the user should be able to select/copy opts back in. */
+.selectable {
+  user-select: text;
+  cursor: auto;
+}
+
+/* macOS overlay title bar: this strip drags the window. */
+.uwu-drag {
+  -webkit-app-region: drag;
+}
+.uwu-no-drag {
+  -webkit-app-region: no-drag;
+}
+
+.uwu-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.uwu-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
