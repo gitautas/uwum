@@ -15,7 +15,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::task::JoinHandle;
 
 use crate::{
-    dto::{Diff, LatestEvent, RoomMemberDto, RoomSummary, SpaceSummary},
+    dto::{Diff, LatestEvent, RoomMemberDto, RoomSummary, RoomsUpdate, SpaceSummary},
     error::{Error, Result},
     events::EV_ROOMS,
     matrix::MatrixCore,
@@ -215,16 +215,19 @@ pub fn spawn_room_list_task(app: AppHandle, core: Arc<MatrixCore>) -> JoinHandle
                 converted.push(convert_room_diff(diff).await);
             }
 
-            // Keep the mirror in step before emitting, so a `get_rooms` racing
-            // with this update sees the same list the event describes.
-            {
+            // Fold into the mirror and take a sequence number in one locked
+            // step, so the snapshot a `get_rooms` returns always states exactly
+            // which batches it already contains.
+            let update = {
                 let mut mirror = core.rooms.lock().await;
                 for diff in &converted {
-                    apply_diff(&mut mirror, diff);
+                    apply_diff(&mut mirror.rooms, diff);
                 }
-            }
+                mirror.seq += 1;
+                RoomsUpdate { seq: mirror.seq, diffs: converted }
+            };
 
-            if let Err(e) = app.emit(EV_ROOMS, &converted) {
+            if let Err(e) = app.emit(EV_ROOMS, &update) {
                 tracing::warn!("couldn't emit room list update: {e}");
             }
         }
@@ -503,13 +506,15 @@ pub async fn create(core: &MatrixCore, new: NewRoom) -> Result<NewRoomResult> {
     // business being advertised.
     request.visibility = if new.is_public { Visibility::Public } else { Visibility::Private };
 
-    if new.is_public {
-        // The user types `movies`; tolerate them typing `#movies:server` too.
-        request.room_alias_name = new
-            .alias
-            .map(|a| a.trim().trim_start_matches('#').split(':').next().unwrap_or("").to_owned())
-            .filter(|a| !a.is_empty());
-    }
+    // An alias is a nickname for the room, not a permission: an invite-only
+    // room can have one, and having one doesn't let anybody in. Who can join is
+    // the join rule, set by the preset above.
+    //
+    // The user types `movies`; tolerate them typing `#movies:server` too.
+    request.room_alias_name = new
+        .alias
+        .map(|a| a.trim().trim_start_matches('#').split(':').next().unwrap_or("").to_owned())
+        .filter(|a| !a.is_empty());
 
     for user in &new.invite {
         request.invite.push(matrix_sdk::ruma::UserId::parse(user)?);

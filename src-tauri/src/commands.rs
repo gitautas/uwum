@@ -8,7 +8,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::{
     dto::{
-        HomeserverInfo, RoomMemberDto, RoomSummary, SendOptions, SessionInfo, SpaceSummary,
+        HomeserverInfo, RoomMemberDto, RoomsSnapshot, SendOptions, SessionInfo, SpaceSummary,
         TimelineItemDto,
     },
     error::{Error, Result},
@@ -95,8 +95,10 @@ pub async fn current_session(state: State<'_, AppState>) -> Result<Option<Sessio
 /// before the UI is listening. The UI calls this once it has subscribed, and
 /// applies diffs from then on.
 #[tauri::command]
-pub async fn get_rooms(state: State<'_, AppState>) -> Result<Vec<RoomSummary>> {
-    Ok(state.core().await?.rooms.lock().await.clone())
+pub async fn get_rooms(state: State<'_, AppState>) -> Result<RoomsSnapshot> {
+    let core = state.core().await?;
+    let mirror = core.rooms.lock().await;
+    Ok(RoomsSnapshot { seq: mirror.seq, rooms: mirror.rooms.clone() })
 }
 
 #[tauri::command]

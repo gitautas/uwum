@@ -3,16 +3,26 @@ import { useEffect, useState } from "react";
 import * as ipc from "../lib/ipc";
 import type { RoomPermissions, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
-import { Button, Icon, RaveLabel, Toggle } from "./ui";
+import { Button, Icon, Modal, RaveLabel, Toggle } from "./ui";
 
 /**
  * Renaming a room, and getting out of one.
  *
+ * A dialog rather than another section in the room panel: that panel is a
+ * narrow column that already carries the member list, and neither of these is
+ * something you do while reading.
+ *
  * The editing half only appears when this account can actually change the
- * thing — a disabled field you can't act on is just clutter in a narrow panel.
- * Permissions are read once per room rather than carried on every summary.
+ * thing — a disabled field you can't act on is just clutter. Permissions are
+ * read once per room rather than carried on every room summary.
  */
-export function RoomSettings({ room }: { room: RoomSummary }) {
+export function RoomSettingsDialog({
+  room,
+  onClose,
+}: {
+  room: RoomSummary;
+  onClose: () => void;
+}) {
   const [permissions, setPermissions] = useState<RoomPermissions | null>(null);
 
   useEffect(() => {
@@ -30,10 +40,18 @@ export function RoomSettings({ room }: { room: RoomSummary }) {
   const canEdit = permissions?.canRename || permissions?.canSetTopic;
 
   return (
-    <>
-      {canEdit && <RoomEditor room={room} permissions={permissions!} />}
-      <LeaveRoom room={room} />
-    </>
+    <Modal title={room.isDirect ? "this chat" : "room settings"} onClose={onClose}>
+      {canEdit ? (
+        <RoomEditor room={room} permissions={permissions!} />
+      ) : (
+        permissions && (
+          <div style={{ fontSize: 12.5, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+            you can't rename this one — that needs more power than you have here.
+          </div>
+        )
+      )}
+      <LeaveRoom room={room} onLeft={onClose} />
+    </Modal>
   );
 }
 
@@ -80,8 +98,6 @@ function RoomEditor({
 
   return (
     <>
-      <RaveLabel style={{ padding: "18px 4px 8px" }}>edit</RaveLabel>
-
       {permissions.canRename && (
         <input
           className="selectable"
@@ -114,7 +130,7 @@ function RoomEditor({
   );
 }
 
-function LeaveRoom({ room }: { room: RoomSummary }) {
+function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) {
   const showBanner = useStore((s) => s.showBanner);
   const selectRoom = useStore((s) => s.selectRoom);
   const [confirming, setConfirming] = useState(false);
@@ -134,6 +150,7 @@ function LeaveRoom({ room }: { room: RoomSummary }) {
     setLeaving(true);
     try {
       await ipc.leaveRoom(room.id, forget);
+      onLeft();
       void selectRoom(null);
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
@@ -144,7 +161,7 @@ function LeaveRoom({ room }: { room: RoomSummary }) {
   if (!confirming) {
     return (
       <>
-        <RaveLabel style={{ padding: "18px 4px 8px" }}>leaving</RaveLabel>
+        <RaveLabel style={{ padding: "22px 0 8px" }}>leaving</RaveLabel>
         <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
           leave {room.isDirect ? "this chat" : "this room"}
         </Button>
@@ -154,7 +171,7 @@ function LeaveRoom({ room }: { room: RoomSummary }) {
 
   return (
     <>
-      <RaveLabel style={{ padding: "18px 4px 8px" }}>leaving</RaveLabel>
+      <RaveLabel style={{ padding: "22px 0 8px" }}>leaving</RaveLabel>
       <div
         style={{
           background: "var(--surface-card)",

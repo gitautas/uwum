@@ -34,6 +34,14 @@ impl Drop for OpenTimeline {
     }
 }
 
+/// The room list the frontend is believed to hold, and the number of diff
+/// batches folded into it. `seq` only ever increases; batch N carries seq N.
+#[derive(Default)]
+pub struct RoomMirror {
+    pub seq: u64,
+    pub rooms: Vec<crate::dto::RoomSummary>,
+}
+
 pub struct MatrixCore {
     pub client: Client,
     pub sync_service: Arc<SyncService>,
@@ -41,13 +49,21 @@ pub struct MatrixCore {
     pub pointer: SessionPointer,
     #[allow(dead_code)] // kept alongside the session for store maintenance
     pub data_dir: PathBuf,
-    /// The room list as last pushed to the frontend.
+    /// The room list as last pushed to the frontend, and how many diff batches
+    /// have been folded into it.
     ///
     /// Sync starts as soon as a session is restored, which is before the UI has
     /// had a chance to subscribe — so the first `Reset` would otherwise be sent
     /// to nobody. Keeping a mirror lets a newly-mounted UI ask for the current
     /// list instead of waiting for the next change.
-    pub rooms: Mutex<Vec<crate::dto::RoomSummary>>,
+    ///
+    /// The counter is what makes that snapshot safe to combine with the diff
+    /// stream. Updating the mirror and emitting the event cannot be one atomic
+    /// step as far as the frontend is concerned — the command response and the
+    /// event travel separately and can arrive in either order — so a snapshot
+    /// says which batches it already contains, and the frontend drops the ones
+    /// it's seen.
+    pub rooms: Mutex<RoomMirror>,
     /// Keyed by room ID, or `"<room_id>|<thread_root>"` for thread timelines.
     pub timelines: Mutex<HashMap<String, OpenTimeline>>,
     /// Background tasks owned by this session, aborted on sign-out.

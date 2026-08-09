@@ -5,13 +5,16 @@ import * as ipc from "../lib/ipc";
 import type { RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
-import { RoomSettings } from "./RoomSettings";
+import { RoomSettingsDialog } from "./RoomSettings";
 import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
 
 export function RoomInfo({ room }: { room: RoomSummary }) {
   const [members, setMembers] = useState<RoomMember[] | null>(null);
   const showBanner = useStore((s) => s.showBanner);
   const openLightbox = useStore((s) => s.openLightbox);
+  // Local rather than in the store: this dialog only exists while the panel
+  // that owns the room is on screen.
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +55,34 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
         padding: "18px 16px 24px",
       }}
     >
+      <button
+        onClick={() => setSettingsOpen(true)}
+        title="room settings"
+        aria-label="room settings"
+        style={{
+          position: "absolute",
+          top: 14,
+          right: 14,
+          width: 28,
+          height: 28,
+          borderRadius: 999,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          cursor: "pointer",
+          background: "var(--surface-card)",
+          border: "1px solid var(--border-subtle)",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "var(--surface-card-raised)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "var(--surface-card)";
+        }}
+      >
+        <Icon name="pencil-simple" size={13} color="var(--text-secondary)" />
+      </button>
+
       <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
         <button
           onClick={() => room.avatarUrl && openLightbox(room.avatarUrl, room.name)}
@@ -148,7 +179,9 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
         />
       </div>
 
-      <RoomSettings room={room} />
+      {settingsOpen && (
+        <RoomSettingsDialog room={room} onClose={() => setSettingsOpen(false)} />
+      )}
     </div>
   );
 }

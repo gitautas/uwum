@@ -1,9 +1,8 @@
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 
 import * as ipc from "../lib/ipc";
 import { useStore } from "../store";
-import { Button, Icon, RaveLabel, Spinner, Toggle } from "./ui";
+import { Button, Modal, RaveLabel, Spinner, Toggle } from "./ui";
 
 type Mode = "create" | "join";
 
@@ -43,14 +42,6 @@ function Dialog() {
 
   const [aliasOrId, setAliasOrId] = useState("");
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [close]);
-
   async function create() {
     if (!name.trim() || busy) return;
     setBusy(true);
@@ -59,7 +50,7 @@ function Dialog() {
         name: name.trim(),
         topic: topic.trim() || undefined,
         isPublic,
-        alias: isPublic ? alias.trim() || undefined : undefined,
+        alias: alias.trim() || undefined,
         encrypted,
         parentSpace: addToSpace ? activeSpaceId : null,
       });
@@ -99,145 +90,111 @@ function Dialog() {
     }
   }
 
-  return createPortal(
-    <div
-      onClick={close}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 180,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-        background: "rgba(11,11,15,.7)",
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="uwu-scroll"
-        style={{
-          width: 420,
-          maxHeight: "calc(100vh - 48px)",
-          overflowY: "auto",
-          padding: 24,
-          borderRadius: 24,
-          background: "var(--surface-card-raised)",
-          border: "1px solid var(--border-default)",
-          boxShadow: "var(--shadow-pop)",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-          <div
-            style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 800,
-              fontSize: 20,
-              flex: 1,
-            }}
-          >
-            {mode === "create" ? "make a room~" : "join a room"}
-          </div>
-          <button onClick={close} aria-label="close" style={{ cursor: "pointer", display: "flex" }}>
-            <Icon name="x" size={15} color="var(--text-tertiary)" />
-          </button>
-        </div>
+  return (
+    <Modal title={mode === "create" ? "make a room~" : "join a room"} onClose={close}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
+        <ModeTab label="make one" active={mode === "create"} onClick={() => setMode("create")} />
+        <ModeTab label="join one" active={mode === "join"} onClick={() => setMode("join")} />
+      </div>
 
-        <div style={{ display: "flex", gap: 6, marginBottom: 20 }}>
-          <ModeTab label="make one" active={mode === "create"} onClick={() => setMode("create")} />
-          <ModeTab label="join one" active={mode === "join"} onClick={() => setMode("join")} />
-        </div>
+      {mode === "create" ? (
+        <>
+          <Field label="name">
+            <Input value={name} onChange={setName} placeholder="movie night" autoFocus />
+          </Field>
 
-        {mode === "create" ? (
-          <>
-            <Field label="name">
-              <Input value={name} onChange={setName} placeholder="movie night" autoFocus />
-            </Field>
+          <Field label="what's it for">
+            <Input value={topic} onChange={setTopic} placeholder="optional~" />
+          </Field>
 
-            <Field label="what's it for">
-              <Input value={topic} onChange={setTopic} placeholder="optional~" />
-            </Field>
+          <SwitchRow
+            label="anyone can join"
+            hint={
+              isPublic
+                ? "listed in your server's directory, and anyone can walk in"
+                : "invite only"
+            }
+            on={isPublic}
+            onToggle={setIsPublic}
+          />
 
-            <SwitchRow
-              label="anyone can join"
-              hint={
-                isPublic
-                  ? "listed in your server's directory, and anyone can walk in"
-                  : "invite only"
-              }
-              on={isPublic}
-              onToggle={setIsPublic}
-            />
-
-            {isPublic && (
-              <Field label="address">
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-                    #
-                  </span>
-                  <Input value={alias} onChange={setAlias} placeholder="movie-night" />
-                </div>
-              </Field>
-            )}
-
-            <SwitchRow
-              label="encrypt it"
-              hint={
-                encrypted
-                  ? "only people in the room can read it. this can't be turned off later."
-                  : "your homeserver can read everything sent here. you can't turn encryption on later."
-              }
-              on={encrypted}
-              onToggle={setEncrypted}
-            />
-
-            {space && (
-              <SwitchRow
-                label={`put it in ${space.name}`}
-                hint="you need permission to manage that space — if you haven't got it, the room still gets made, just not filed there"
-                on={addToSpace}
-                onToggle={setAddToSpace}
-              />
-            )}
-
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
-              <Button onClick={() => void create()} disabled={!name.trim() || busy}>
-                {busy ? <Spinner size={14} color="var(--text-on-accent)" /> : "make it"}
-              </Button>
+          <Field label="address">
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
+                #
+              </span>
+              <Input value={alias} onChange={setAlias} placeholder="movie-night" />
             </div>
-          </>
-        ) : (
-          <>
-            <Field label="address or id">
-              <Input
-                value={aliasOrId}
-                onChange={setAliasOrId}
-                placeholder="#room:server.tld"
-                autoFocus
-                onEnter={() => void join()}
-              />
-            </Field>
             <div
               style={{
-                fontSize: 12,
+                fontSize: 11.5,
                 color: "var(--text-tertiary)",
-                lineHeight: 1.5,
-                marginTop: -4,
+                lineHeight: 1.45,
+                marginTop: 6,
               }}
             >
-              an alias like <code>#uwu:m.uwu.lt</code>, or a room id if someone gave you one.
+              optional. an address is just a nicer name to share than the room
+              id — it doesn't let anyone in on its own, that's what "anyone can
+              join" above decides.
             </div>
+          </Field>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
-              <Button onClick={() => void join()} disabled={!aliasOrId.trim() || busy}>
-                {busy ? <Spinner size={14} color="var(--text-on-accent)" /> : "join"}
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>,
-    document.body,
+          <SwitchRow
+            label="encrypt it"
+            hint={
+              encrypted
+                ? "only people in the room can read it. this can't be turned off later."
+                : "your homeserver can read everything sent here. you can't turn encryption on later."
+            }
+            on={encrypted}
+            onToggle={setEncrypted}
+          />
+
+          {space && (
+            <SwitchRow
+              label={`put it in ${space.name}`}
+              hint="you need permission to manage that space — if you haven't got it, the room still gets made, just not filed there"
+              on={addToSpace}
+              onToggle={setAddToSpace}
+            />
+          )}
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
+            <Button onClick={() => void create()} disabled={!name.trim() || busy}>
+              {busy ? <Spinner size={14} color="var(--text-on-accent)" /> : "make it"}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <>
+          <Field label="address or id">
+            <Input
+              value={aliasOrId}
+              onChange={setAliasOrId}
+              placeholder="#room:server.tld"
+              autoFocus
+              onEnter={() => void join()}
+            />
+          </Field>
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-tertiary)",
+              lineHeight: 1.5,
+              marginTop: -4,
+            }}
+          >
+            an alias like <code>#uwu:m.uwu.lt</code>, or a room id if someone gave you one.
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 22 }}>
+            <Button onClick={() => void join()} disabled={!aliasOrId.trim() || busy}>
+              {busy ? <Spinner size={14} color="var(--text-on-accent)" /> : "join"}
+            </Button>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
 

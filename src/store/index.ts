@@ -12,7 +12,8 @@ import { applyDiffs } from "../lib/diff";
 import * as ipc from "../lib/ipc";
 import * as prefs from "../lib/settings";
 import type {
-  Diff,
+  RoomsSnapshot,
+  RoomsUpdate,
   RoomSummary,
   SasStateInfo,
   SessionInfo,
@@ -54,6 +55,17 @@ interface State {
 
   // rooms
   rooms: RoomSummary[];
+  /**
+   * The last room-list batch folded into `rooms`.
+   *
+   * The snapshot and the diff stream arrive over different channels and can
+   * cross in flight, so both carry this number: a batch at or below it is
+   * already in the list, and a batch more than one ahead means one went
+   * missing and the list can no longer be trusted to index correctly.
+   */
+  roomsSeq: number;
+  /** A resync is in flight; diffs are unreliable until it lands. */
+  roomsResyncing: boolean;
   spaces: SpaceSummary[];
   activeSpaceId: string | null;
   activeRoomId: string | null;
@@ -98,10 +110,12 @@ interface State {
 
 interface Actions {
   setSession(session: SessionInfo | null): void;
-  setRooms(rooms: RoomSummary[]): void;
+  setRooms(snapshot: RoomsSnapshot): void;
   setBootstrapped(v: boolean): void;
-  applyRoomDiffs(diffs: Diff<RoomSummary>[]): void;
+  applyRoomDiffs(update: RoomsUpdate): void;
   setSpaces(spaces: SpaceSummary[]): void;
+  /** Re-read the whole room list after a dropped batch. */
+  resyncRooms(): Promise<void>;
   /** Re-read the spaces now rather than waiting for the slow poll. */
   refreshSpaces(): Promise<void>;
   setActiveSpace(id: string | null): void;
@@ -143,6 +157,8 @@ const initial: State = {
   bootstrapped: false,
   syncStatus: { state: "idle", message: null },
   rooms: [],
+  roomsSeq: 0,
+  roomsResyncing: false,
   spaces: [],
   activeSpaceId: null,
   activeRoomId: null,
@@ -171,10 +187,46 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   setSession: (session) => set({ session }),
 
-  setRooms: (rooms) => set({ rooms }),
+  setRooms: (snapshot) =>
+    set((s) =>
+      // A snapshot older than what we've already applied is stale news; it
+      // would undo batches that arrived while it was being fetched.
+      snapshot.seq >= s.roomsSeq
+        ? { rooms: snapshot.rooms, roomsSeq: snapshot.seq, roomsResyncing: false }
+        : { roomsResyncing: false },
+    ),
   setBootstrapped: (bootstrapped) => set({ bootstrapped }),
 
-  applyRoomDiffs: (diffs) => set((s) => ({ rooms: applyDiffs(s.rooms, diffs) })),
+  applyRoomDiffs: ({ seq, diffs }) => {
+    const { roomsSeq, roomsResyncing } = get();
+
+    // Already in the list: this batch was folded in before the snapshot we
+    // hold was taken.
+    if (seq <= roomsSeq) return;
+
+    // A gap means a batch went missing, so every index in this one counts
+    // against a list we don't have. Applying it would silently misplace rooms;
+    // ask for the truth instead.
+    if (seq > roomsSeq + 1) {
+      if (!roomsResyncing) {
+        set({ roomsResyncing: true });
+        void get().resyncRooms();
+      }
+      return;
+    }
+
+    if (roomsResyncing) return;
+    set((s) => ({ rooms: applyDiffs(s.rooms, diffs), roomsSeq: seq }));
+  },
+
+  resyncRooms: async () => {
+    try {
+      get().setRooms(await ipc.getRooms());
+    } catch {
+      // Leave the flag set: the next batch will try again.
+      set({ roomsResyncing: false });
+    }
+  },
 
   setSpaces: (spaces) => set({ spaces }),
 

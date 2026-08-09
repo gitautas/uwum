@@ -12,7 +12,6 @@ import type {
   CallCredentials,
   CallParticipants,
   DeviceInfo,
-  Diff,
   Profile,
   ProfileUpdate,
   HomeserverInfo,
@@ -21,7 +20,8 @@ import type {
   RecoveryStatus,
   RoomMember,
   RoomPermissions,
-  RoomSummary,
+  RoomsSnapshot,
+  RoomsUpdate,
   SasStateInfo,
   SendOptions,
   SessionInfo,
@@ -78,7 +78,7 @@ export const logout = (wipe = false) => invoke<void>("logout", { wipe });
  * the backend's first push has no listener. Call this once after subscribing;
  * diffs keep it current from then on.
  */
-export const getRooms = () => invoke<RoomSummary[]>("get_rooms");
+export const getRooms = () => invoke<RoomsSnapshot>("get_rooms");
 
 export const getSpaces = () => invoke<SpaceSummary[]>("get_spaces");
 
@@ -364,8 +364,8 @@ export const getActiveCalls = () => invoke<string[]>("get_active_calls");
 export const onOpenSettings = (fn: () => void): Promise<UnlistenFn> =>
   listen("uwum://open-settings", () => fn());
 
-export const onRooms = (fn: (diffs: Diff<RoomSummary>[]) => void): Promise<UnlistenFn> =>
-  listen<Diff<RoomSummary>[]>("matrix://rooms", (e) => fn(e.payload));
+export const onRooms = (fn: (update: RoomsUpdate) => void): Promise<UnlistenFn> =>
+  listen<RoomsUpdate>("matrix://rooms", (e) => fn(e.payload));
 
 export const onTimeline = (fn: (update: TimelineUpdate) => void): Promise<UnlistenFn> =>
   listen<TimelineUpdate>("matrix://timeline", (e) => fn(e.payload));

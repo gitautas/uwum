@@ -247,6 +247,18 @@ export type Diff<T> =
   | { op: "truncate"; length: number }
   | { op: "reset"; values: T[] };
 
+/** A numbered batch of room-list changes. */
+export interface RoomsUpdate {
+  seq: number;
+  diffs: Diff<RoomSummary>[];
+}
+
+/** The room list as it stands, and the last batch folded into it. */
+export interface RoomsSnapshot {
+  seq: number;
+  rooms: RoomSummary[];
+}
+
 export interface TimelineUpdate {
   /** Room ID, or `<roomId>|<threadRoot>` for a thread timeline. */
   roomId: string;

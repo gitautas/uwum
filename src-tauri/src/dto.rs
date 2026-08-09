@@ -275,6 +275,23 @@ pub enum ContentDto {
 // diffs
 // ---------------------------------------------------------------------------
 
+/// A batch of room-list changes, numbered so the frontend can tell whether a
+/// snapshot it holds already includes them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomsUpdate {
+    pub seq: u64,
+    pub diffs: Vec<Diff<RoomSummary>>,
+}
+
+/// The room list as it stands, and the last batch folded into it.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomsSnapshot {
+    pub seq: u64,
+    pub rooms: Vec<RoomSummary>,
+}
+
 /// A `VectorDiff` rendered for JS. Mirrors `eyeball_im::VectorDiff` so the
 /// frontend can apply updates in place instead of re-rendering the world.
 #[derive(Debug, Clone, Serialize)]
