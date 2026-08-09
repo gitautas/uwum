@@ -1,0 +1,12 @@
+:root{
+--font-display:'Baloo 2',ui-rounded,'Segoe UI',sans-serif;
+--font-rave:'Unbounded',ui-sans-serif,sans-serif;
+--font-body:'Nunito',ui-sans-serif,system-ui,sans-serif;
+--font-mono:'JetBrains Mono',ui-monospace,'SFMono-Regular',monospace;
+--text-display-xl:clamp(40px,6vw,72px);
+--text-display-lg:40px;--text-display-md:32px;--text-display-sm:26px;
+--text-body-lg:18px;--text-body-md:15px;--text-body-sm:13px;--text-caption:11.5px;
+--lh-tight:1.08;/* @kind other */--lh-snug:1.25;/* @kind other */--lh-normal:1.5;/* @kind other */--lh-relaxed:1.65;/* @kind other */
+--ls-tight:-0.01em;/* @kind other */--ls-wide:0.06em;/* @kind other */--ls-widest:0.14em;/* @kind other */
+--fw-regular:400;/* @kind other */--fw-medium:500;/* @kind other */--fw-semibold:600;/* @kind other */--fw-bold:700;/* @kind other */--fw-black:800;/* @kind other */
+}
