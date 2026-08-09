@@ -659,6 +659,14 @@ pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
 /// carries on without you. The UI says which of those is happening.
 pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<()> {
     let room = core.room(&room_id.to_owned())?;
+
+    // Before anything else: stop watching this room. An open timeline is a live
+    // subscriber to the room's event-cache rows, and leaving — forgetting
+    // especially — pulls those rows out from under it. The frontend closes the
+    // timeline when it deselects the room, but that's a different call over a
+    // different channel, so it can't be relied on to have happened first.
+    crate::matrix::timeline::close_all_for_room(core, room_id).await;
+
     room.leave().await?;
 
     if forget {

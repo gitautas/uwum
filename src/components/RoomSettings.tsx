@@ -135,7 +135,6 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
   const selectRoom = useStore((s) => s.selectRoom);
   const [confirming, setConfirming] = useState(false);
   const [forget, setForget] = useState(false);
-  const [leaving, setLeaving] = useState(false);
 
   // Reset when switching rooms, so a half-opened confirmation doesn't follow
   // you to the next one.
@@ -147,14 +146,17 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
   const alone = room.memberCount <= 1;
 
   async function leave() {
-    setLeaving(true);
+    // Look away first. While the leave is in flight the room panel would
+    // otherwise keep asking about a room we're on our way out of — the member
+    // list fetch comes straight back 403 — and the open timeline is a
+    // subscriber to storage that forgetting is about to delete.
+    onLeft();
+    await selectRoom(null);
+
     try {
       await ipc.leaveRoom(room.id, forget);
-      onLeft();
-      void selectRoom(null);
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
-      setLeaving(false);
     }
   }
 
@@ -203,16 +205,10 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
         </div>
 
         <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <Button
-            variant="danger"
-            size="sm"
-            disabled={leaving}
-            onClick={() => void leave()}
-            style={{ flex: 1 }}
-          >
+          <Button variant="danger" size="sm" onClick={() => void leave()} style={{ flex: 1 }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
               <Icon name="sign-out" size={13} color="var(--ink-950)" />
-              {leaving ? "leaving…" : forget ? "leave and forget" : "leave"}
+              {forget ? "leave and forget" : "leave"}
             </span>
           </Button>
           <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
