@@ -654,6 +654,7 @@ function ImageBody({
   media: MediaInfo;
   sticker: boolean;
 }) {
+  const openLightbox = useStore((s) => s.openLightbox);
   const maxWidth = sticker ? 160 : 400;
   const maxHeight = sticker ? 160 : 320;
 
@@ -676,7 +677,10 @@ function ImageBody({
       alt={body}
       loading="lazy"
       draggable={false}
+      // The lightbox gets the *original* URI, not the thumbnail being shown.
+      onClick={() => media.mxc && openLightbox(media.mxc, body || "picture")}
       style={{
+        cursor: media.mxc ? "zoom-in" : "default",
         marginTop: 4,
         width,
         height,
