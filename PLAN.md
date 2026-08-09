@@ -201,9 +201,10 @@ this room".
 
 ---
 
-## 3. Profile cover photo and bio — BLOCKED
+## 3. Profile cover photo and bio
 
-Smallest of the three, and currently not buildable. See the check below.
+Smallest of the three, and buildable — the endpoint works and there's an
+existing client to interoperate with.
 
 ### Spec: MSC4133 extended profiles
 
@@ -222,26 +223,46 @@ gg.uwu.bio           → string
 gg.uwu.cover_url     → mxc://…
 ```
 
-### Checked — not supported
+### Checked — supported, but don't trust the capability flag
 
-Ran against m.uwu.lt (Continuwuity, 2026-08-09):
+`unstable_features` on m.uwu.lt does **not** list `uk.tcpip.msc4133`. That is
+not evidence of anything: Continuwuity implements extended profiles without
+advertising the flag. Test the endpoint, not the advertisement.
 
 ```bash
-curl -s https://m.uwu.lt/_matrix/client/versions
+curl -s https://m.uwu.lt/_matrix/client/v3/profile/@user:m.uwu.lt
 ```
 
-`unstable_features` returned `computer.gingershaped.msc4466`,
-`org.matrix.msc4155`, `org.matrix.simplified_msc3575` and
-`uk.half-shot.msc2666.query_mutual_rooms`. **No `uk.tcpip.msc4133`**, so
-`PUT /_matrix/client/v3/profile/{userId}/{key}` will 404 and there is nothing to
-build against.
+Returned (2026-08-09):
 
-This isn't a stale server — it advertises up to `v1.18`. MSC4133 just isn't
-implemented yet. Re-run the check before picking this up; if it appears, the
-rest of this section still stands.
+```json
+{
+  "avatar_url": "mxc://…",
+  "displayname": "Gintas",
+  "chat.commet.profile_bio": { "body": "…" },
+  "chat.commet.profile_status": "vau "
+}
+```
 
-The fallbacks aren't worth taking: account data is visible only to you, which
-defeats the purpose of a public bio.
+A GET for an unset custom key returns `200 {}` rather than `404
+M_NOT_FOUND` — so treat empty object and absent as the same "not set".
+
+`PUT /_matrix/client/v3/profile/{userId}/{key}` is **untested**; it needs auth,
+so try it early rather than assuming write works because read does.
+
+### Interoperate with Commet, don't invent keys
+
+Commet is already writing these, and it's the client to match:
+
+| field | key | shape |
+|---|---|---|
+| bio | `chat.commet.profile_bio` | `{ "body": "…" }` — an object, not a string |
+| status | `chat.commet.profile_status` | a bare string |
+
+Write Commet's keys so bios show up in both clients. A **cover photo key was
+not observed** — either unset or unsupported there. Check Commet's source before
+choosing; if there's nothing, use `gg.uwu.cover_url` (mxc) and accept that only
+uwum reads it.
 
 ### Work
 
@@ -267,5 +288,5 @@ assume it's room-scoped.
    upload path.
 3. Custom emoji and stickers — the big one, in this order: pack storage →
    picker → sending → reactions → import → autocomplete.
-4. Profile fields — blocked on the homeserver. Re-run the version check first;
-   don't start until `uk.tcpip.msc4133` shows up.
+4. Profile fields — unblocked. Confirm PUT works before building UI, and write
+   Commet's key names so bios interoperate.
