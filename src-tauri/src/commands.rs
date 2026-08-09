@@ -306,6 +306,44 @@ pub async fn send_attachment(
     .await
 }
 
+/// Send an attachment the WebView holds as bytes rather than as a path — a
+/// pasted screenshot, a file copied out of another app.
+///
+/// The bytes ride in the request body instead of the JSON arguments: a
+/// serialised byte array costs several times the size of the file it carries,
+/// and a pasted video is not small. Everything else travels as headers, which
+/// are ASCII, so the filename is percent-encoded the same way the frontend
+/// encodes an mxc URI.
+#[tauri::command]
+pub async fn send_attachment_bytes(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<()> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err(Error::Other("expected the file's bytes as the request body".into()));
+    };
+
+    let header = |name: &str| {
+        request.headers().get(name).and_then(|v| v.to_str().ok()).filter(|v| !v.is_empty())
+    };
+    let decoded = |name: &str| header(name).and_then(media::percent_decode);
+
+    let room_id = header("x-room-id")
+        .ok_or_else(|| Error::Other("no room to send that to".into()))?;
+    let filename = decoded("x-filename").unwrap_or_else(|| "attachment".to_owned());
+
+    timeline::send_attachment_data(
+        &*state.core().await?,
+        &parse_room_id(room_id)?,
+        header("x-thread-root"),
+        &filename,
+        header("x-mime"),
+        bytes.clone(),
+        decoded("x-caption"),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn get_pinned_events(
     state: State<'_, AppState>,

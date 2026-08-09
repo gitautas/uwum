@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "../lib/ipc";
+import { uploadFiles, uploadPaths } from "../lib/upload";
 import { selectDraft, useStore } from "../store";
 import { Icon } from "./ui";
 
@@ -92,13 +93,32 @@ export function Composer({
 
   async function attach() {
     try {
-      const selected = await open({ multiple: false });
-      if (typeof selected !== "string") return;
-      await ipc.sendAttachment(roomId, selected, undefined, threadRoot);
+      const selected = await open({ multiple: true });
+      const paths = typeof selected === "string" ? [selected] : (selected ?? []);
+      await uploadPaths(paths, roomId, threadRoot);
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
     }
   }
+
+  // Paste a screenshot, an image, any file — it goes to this room.
+  //
+  // The listener is on the window rather than the textarea: pasting is a thing
+  // you do *at the room*, and having it depend on whether the composer happens
+  // to be focused would be a small mystery every time it didn't work. A paste
+  // carrying no files isn't ours, so ordinary text paste is untouched.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length === 0) return;
+
+      e.preventDefault();
+      void uploadFiles(files, roomId, threadRoot);
+    };
+
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+  }, [roomId, threadRoot]);
 
   return (
     <div style={{ padding: "12px 22px 18px" }}>

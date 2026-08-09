@@ -57,6 +57,7 @@ pub fn run() {
             commands::mark_room_read,
             commands::send_read_receipt,
             commands::send_attachment,
+            commands::send_attachment_bytes,
             commands::get_pinned_events,
             commands::get_event_body,
             // media
@@ -85,6 +86,10 @@ pub fn run() {
             commands::get_call_participants,
             commands::get_active_calls,
         ])
+        .setup(|app| {
+            install_settings_menu_item(app.handle())?;
+            Ok(())
+        })
         .build(tauri::generate_context!())
         .expect("error while building uwum")
         .run(|app, event| {
@@ -99,6 +104,78 @@ pub fn run() {
                 });
             }
         });
+}
+
+/// Put "settings…" in the app menu, with the shortcut every mac app uses.
+///
+/// This has to be a menu item rather than a `keydown` handler in the WebView.
+/// On macOS a command-key combination is offered to the menu bar first, and one
+/// no menu item claims is swallowed by the responder chain — it never reaches
+/// the web content, so a JS listener for `cmd+,` simply never fires. Making it
+/// a real menu item is also the honest thing: the shortcut is discoverable, and
+/// it sits where a mac user looks for it.
+///
+/// The frontend keeps its own `ctrl+,` handler for Windows and Linux, where the
+/// menu bar isn't in the way.
+fn install_settings_menu_item(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
+
+    let settings = MenuItemBuilder::with_id("settings", "Settings…")
+        .accelerator("CmdOrCtrl+,")
+        .build(app)?;
+
+    // Spelled out rather than inserted into `Menu::default()`: the default
+    // menu's shape is not ours to depend on, and an insert that misses fails
+    // silently, which is exactly how this was first written and why it didn't
+    // work.
+    //
+    // Edit has to be here even though nothing in it is ours — on macOS, cut,
+    // copy, paste and select-all only function because these menu items claim
+    // their shortcuts.
+    let app_menu = SubmenuBuilder::new(app, "uwum")
+        .about(None)
+        .separator()
+        .item(&settings)
+        .separator()
+        .services()
+        .separator()
+        .hide()
+        .hide_others()
+        .show_all()
+        .separator()
+        .quit()
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .separator()
+        .close_window()
+        .build()?;
+
+    let menu = MenuBuilder::new(app)
+        .items(&[&app_menu, &edit_menu, &view_menu, &window_menu])
+        .build()?;
+    app.set_menu(menu)?;
+
+    app.on_menu_event(|app, event| {
+        if event.id() == "settings" {
+            events::emit(app, events::EV_OPEN_SETTINGS, ());
+        }
+    });
+
+    Ok(())
 }
 
 /// Serve `uwum://media/<encoded-mxc>?w=&h=` from the Matrix media repository.

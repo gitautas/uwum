@@ -21,6 +21,10 @@ pub const EV_VERIFICATION_STATE: &str = "matrix://verification-state";
 pub const EV_VERIFICATION_REQUEST: &str = "matrix://verification-request";
 pub const EV_VERIFICATION_UPDATE: &str = "matrix://verification-update";
 
+/// The menu bar asking the UI to open settings. Not a Matrix event — it comes
+/// from the window, so it gets its own namespace.
+pub const EV_OPEN_SETTINGS: &str = "uwum://open-settings";
+
 pub fn emit<T: serde::Serialize + Clone>(app: &AppHandle, event: &str, payload: T) {
     // A failed emit means the window is gone; there's nothing useful to do
     // about it and it must not take down the producing task.

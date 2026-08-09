@@ -286,7 +286,8 @@ pub fn parse_request(uri: &str) -> Option<MediaRequest> {
     Some(MediaRequest { mxc, size, mime_hint })
 }
 
-fn percent_decode(input: &str) -> Option<String> {
+/// Percent-decode a value the frontend encoded with `encodeURIComponent`.
+pub fn percent_decode(input: &str) -> Option<String> {
     let bytes = input.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

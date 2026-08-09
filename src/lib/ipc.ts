@@ -190,6 +190,30 @@ export const sendAttachment = (
     threadRoot: threadRoot ?? null,
   });
 
+/**
+ * Send a file the WebView holds as bytes — a pasted screenshot, an image
+ * dragged out of another app.
+ *
+ * The bytes go in the request body rather than the arguments: as JSON they'd
+ * serialise to a numeric array several times the size of the file. Everything
+ * else rides in headers, which have to be ASCII, so text is percent-encoded.
+ */
+export const sendAttachmentBytes = (
+  roomId: string,
+  file: { name: string; type: string; bytes: ArrayBuffer },
+  threadRoot?: string,
+  caption?: string,
+) =>
+  invoke<void>("send_attachment_bytes", file.bytes, {
+    headers: {
+      "x-room-id": roomId,
+      "x-filename": encodeURIComponent(file.name),
+      "x-mime": file.type,
+      "x-thread-root": threadRoot ?? "",
+      "x-caption": caption ? encodeURIComponent(caption) : "",
+    },
+  });
+
 export const getPinnedEvents = (roomId: string) =>
   invoke<TimelineItem[]>("get_pinned_events", { roomId });
 
@@ -315,6 +339,10 @@ export const getActiveCalls = () => invoke<string[]>("get_active_calls");
 // ---------------------------------------------------------------------------
 // pushed events
 // ---------------------------------------------------------------------------
+
+/** The "settings…" menu item — on macOS that's where `cmd+,` arrives. */
+export const onOpenSettings = (fn: () => void): Promise<UnlistenFn> =>
+  listen("uwum://open-settings", () => fn());
 
 export const onRooms = (fn: (diffs: Diff<RoomSummary>[]) => void): Promise<UnlistenFn> =>
   listen<Diff<RoomSummary>[]>("matrix://rooms", (e) => fn(e.payload));

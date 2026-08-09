@@ -5,6 +5,7 @@ import * as ipc from "./lib/ipc";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
+import { DropZone } from "./components/DropZone";
 import { LoginScreen } from "./components/LoginScreen";
 import { ProfileCard } from "./components/ProfileCard";
 import { RoomInfo } from "./components/RoomInfo";
@@ -108,6 +109,7 @@ function Shell() {
   const activeRoom = useStore(selectActiveRoom);
 
   useBackendEvents();
+  useAppShortcuts();
 
   return (
     <div
@@ -133,6 +135,7 @@ function Shell() {
 
       <SettingsView />
       <ProfileCard />
+      <DropZone />
       <VerificationModal />
       <SyncIndicator />
 
@@ -222,6 +225,37 @@ function SyncIndicator() {
       {problem ? (status.message ?? status.state) : "session stored without a keychain"}
     </div>
   );
+}
+
+/**
+ * Shortcuts that belong to the app rather than to any one view.
+ *
+ * `cmd+,` on macOS arrives as a *menu event* rather than a keypress: the menu
+ * bar is offered command-key combinations first, and anything no menu item
+ * claims is swallowed before the web content ever sees it. So the mac half of
+ * this lives in `install_settings_menu_item` on the Rust side and comes back as
+ * an event. The listener below is for Windows and Linux, where `ctrl+,` reaches
+ * the page normally.
+ *
+ * Settings closes on Escape already, so this only has to open.
+ */
+function useAppShortcuts() {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "," && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) {
+        e.preventDefault();
+        useStore.getState().openSettings();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    const menu = ipc.onOpenSettings(() => useStore.getState().openSettings());
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      void menu.then((unlisten) => unlisten()).catch(() => {});
+    };
+  }, []);
 }
 
 /** Subscribe to everything Rust pushes, for as long as the shell is mounted. */

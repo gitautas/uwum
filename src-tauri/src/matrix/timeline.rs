@@ -350,6 +350,86 @@ pub async fn send_attachment(
     Ok(())
 }
 
+/// Send bytes we already hold as a file — a pasted screenshot, a dropped image
+/// the WebView handed us as data rather than as a path.
+///
+/// The filename comes from the WebView and is only ever a *label*: it names the
+/// attachment in the timeline and picks the mime type when the caller didn't
+/// supply one. It's reduced to a single path component all the same, so a name
+/// like `../../x` can't be interpreted as a path by anything downstream.
+pub async fn send_attachment_data(
+    core: &MatrixCore,
+    room_id: &RoomId,
+    thread_root: Option<&str>,
+    filename: &str,
+    mime: Option<&str>,
+    bytes: Vec<u8>,
+    caption: Option<String>,
+) -> Result<()> {
+    use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
+
+    if bytes.is_empty() {
+        return Err(Error::Other("there was nothing in that file".into()));
+    }
+
+    let filename = safe_filename(filename);
+    // Trust the caller's mime when it parses — the clipboard knows what it's
+    // holding better than a guess from an invented filename does.
+    let mime = mime
+        .and_then(|m| m.parse::<mime::Mime>().ok())
+        .unwrap_or_else(|| mime_guess::from_path(&filename).first_or_octet_stream());
+
+    let timeline = get(core, room_id, thread_root).await?;
+    let config = AttachmentConfig {
+        caption: caption.map(TextMessageEventContent::plain),
+        ..Default::default()
+    };
+
+    timeline
+        .send_attachment(AttachmentSource::Data { bytes, filename }, mime, config)
+        .use_send_queue()
+        .await
+        .map_err(|e| Error::Other(format!("upload failed: {e}")))?;
+    Ok(())
+}
+
+/// Reduce a caller-supplied name to something safe to use as a filename.
+fn safe_filename(filename: &str) -> String {
+    let trimmed = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default()
+        .trim_matches(|c: char| c == '.' || c.is_whitespace() || c.is_control());
+
+    if trimmed.is_empty() { "attachment".to_owned() } else { trimmed.to_owned() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_filename;
+
+    #[test]
+    fn keeps_an_ordinary_name() {
+        assert_eq!(safe_filename("screenshot.png"), "screenshot.png");
+        assert_eq!(safe_filename("ekrano nuotrauka.png"), "ekrano nuotrauka.png");
+    }
+
+    #[test]
+    fn reduces_a_path_to_its_last_component() {
+        assert_eq!(safe_filename("../../etc/passwd"), "passwd");
+        assert_eq!(safe_filename("C:\\windows\\system32\\x.dll"), "x.dll");
+    }
+
+    #[test]
+    fn never_returns_something_unusable() {
+        // A name that is only separators, dots or blank has nothing left after
+        // trimming, and an empty filename is not a valid attachment.
+        assert_eq!(safe_filename("../.."), "attachment");
+        assert_eq!(safe_filename("   "), "attachment");
+        assert_eq!(safe_filename(""), "attachment");
+    }
+}
+
 /// The set of events currently pinned in a room, newest first.
 pub async fn pinned_events(core: &MatrixCore, room_id: &RoomId) -> Result<Vec<TimelineItemDto>> {
     let room = core.room(&room_id.to_owned())?;
