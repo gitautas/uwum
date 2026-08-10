@@ -373,6 +373,39 @@ pub struct SendOptions {
     /// `m.text` (default), `m.emote`, `m.notice`
     #[serde(default)]
     pub msgtype: Option<String>,
+    /// Custom emotes the body might mention, as `:shortcode:`.
+    ///
+    /// The composer sends the whole set it knows about rather than deciding
+    /// what's in the text; matching is done once, against the rendered HTML, so
+    /// Markdown and emotes can both survive in one message.
+    #[serde(default)]
+    pub emotes: Vec<EmoteRef>,
+}
+
+/// One custom emote the composer can substitute into an outgoing message.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmoteRef {
+    /// Without the surrounding colons.
+    pub shortcode: String,
+    pub url: String,
+}
+
+/// One image from a pack, on its way out as an `m.sticker`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StickerOptions {
+    /// Alt text — the shortcode, unless the pack gave the image a body.
+    pub body: String,
+    pub url: String,
+    #[serde(default)]
+    pub width: Option<u32>,
+    #[serde(default)]
+    pub height: Option<u32>,
+    #[serde(default)]
+    pub size: Option<u32>,
+    #[serde(default)]
+    pub mimetype: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

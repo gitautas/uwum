@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   accentFor,
@@ -11,8 +11,9 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
+import { emoteLookup, reactionShortcode } from "../lib/packs";
 import { renderFormattedBody } from "../lib/richText";
-import type { Content, EventItem, MediaInfo } from "../lib/types";
+import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
 import { useStore } from "../store";
 import { EmojiPicker } from "./EmojiPicker";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
@@ -42,6 +43,8 @@ export function MessageRow({
   const showBanner = useStore((s) => s.showBanner);
   const recentReactions = useStore((s) => s.settings.recentReactions);
   const noteReactionUsed = useStore((s) => s.noteReactionUsed);
+  const packs = useStore((s) => s.packs);
+  const emotes = useMemo(() => emoteLookup(packs), [packs]);
   const senderAnchor = useProfileAnchor(item.sender);
 
   const author = displayNameFor(item.sender, item.senderName);
@@ -269,7 +272,7 @@ export function MessageRow({
                       }),
                 }}
               >
-                <span>{reaction.key}</span>
+                <ReactionKey label={reaction.key} emotes={emotes} size={13} />
                 <span style={{ fontWeight: 700 }}>{reaction.count}</span>
               </button>
             ))}
@@ -383,7 +386,7 @@ export function MessageRow({
                 e.currentTarget.style.transform = "";
               }}
             >
-              {key}
+              <ReactionKey label={key} emotes={emotes} size={15} />
             </button>
           ))}
 
@@ -442,11 +445,52 @@ export function MessageRow({
       {pickerAnchor && (
         <EmojiPicker
           anchor={pickerAnchor}
-          onPick={(key) => void react(key)}
+          packs={packs}
+          onPick={(picked) =>
+            // A reaction is a string, so a custom emote reacts as its
+            // shortcode. Everyone sees `:blobcat:`; anyone with the pack sees
+            // the picture.
+            void react(
+              picked.kind === "unicode" ? picked.emoji : `:${picked.image.shortcode}:`,
+            )
+          }
           onClose={() => setPickerAnchor(null)}
         />
       )}
     </div>
+  );
+}
+
+/**
+ * A reaction as it should be drawn.
+ *
+ * Custom emotes travel as `:shortcode:`, since that's all a reaction can be, so
+ * a key we recognise is swapped for the image and anything else is left as the
+ * text it is.
+ */
+function ReactionKey({
+  label,
+  emotes,
+  size,
+}: {
+  label: string;
+  emotes: Map<string, PackImage>;
+  size: number;
+}) {
+  const shortcode = reactionShortcode(label);
+  const image = shortcode ? emotes.get(shortcode) : undefined;
+  const src = image ? mediaUrl(image.url, { width: size * 3, height: size * 3 }) : null;
+
+  if (!image || !src) return <span>{label}</span>;
+
+  return (
+    <img
+      src={src}
+      alt={label}
+      title={label}
+      draggable={false}
+      style={{ height: size, width: "auto", maxWidth: size * 3, objectFit: "contain" }}
+    />
   );
 }
 

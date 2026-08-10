@@ -15,6 +15,7 @@ import type {
   Profile,
   ProfileUpdate,
   HomeserverInfo,
+  ImagePack,
   NewRoom,
   NewRoomResult,
   RecoveryStatus,
@@ -26,6 +27,7 @@ import type {
   SendOptions,
   SessionInfo,
   SpaceSummary,
+  StickerOptions,
   SyncStatus,
   TimelineItem,
   TimelineUpdate,
@@ -140,8 +142,36 @@ export const sendMessage = (roomId: string, options: SendOptions) =>
       replyTo: options.replyTo ?? null,
       threadRoot: options.threadRoot ?? null,
       msgtype: options.msgtype ?? null,
+      emotes: options.emotes ?? [],
     },
   });
+
+export const sendSticker = (
+  roomId: string,
+  sticker: StickerOptions,
+  threadRoot?: string,
+) =>
+  invoke<void>("send_sticker", {
+    roomId,
+    threadRoot: threadRoot ?? null,
+    sticker: {
+      body: sticker.body,
+      url: sticker.url,
+      width: sticker.width ?? null,
+      height: sticker.height ?? null,
+      size: sticker.size ?? null,
+      mimetype: sticker.mimetype ?? null,
+    },
+  });
+
+/**
+ * Custom emote and sticker packs usable right now.
+ *
+ * `roomId` is the room being looked at: its own packs are available there
+ * whether or not they've been enabled everywhere.
+ */
+export const getImagePacks = (roomId?: string) =>
+  invoke<ImagePack[]>("get_image_packs", { roomId: roomId ?? null });
 
 /** Resolves to `true` once there's nothing older left to load. */
 export const paginateBack = (roomId: string, threadRoot?: string) =>

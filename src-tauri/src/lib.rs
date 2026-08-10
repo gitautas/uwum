@@ -48,10 +48,13 @@ pub fn run() {
             commands::set_room_low_priority,
             commands::set_room_muted,
             commands::set_room_marked_unread,
+            // image packs
+            commands::get_image_packs,
             // timeline
             commands::open_timeline,
             commands::close_timeline,
             commands::send_message,
+            commands::send_sticker,
             commands::paginate_back,
             commands::toggle_reaction,
             commands::edit_message,

@@ -25,7 +25,10 @@ use matrix_sdk_ui::timeline::{
 use tauri::AppHandle;
 
 use crate::{
-    dto::{Diff, SendOptions, TimelineItemDto, TimelineUpdate, convert_timeline_item},
+    dto::{
+        Diff, EmoteRef, SendOptions, StickerOptions, TimelineItemDto, TimelineUpdate,
+        convert_timeline_item,
+    },
     error::{Error, Result},
     events::{EV_TIMELINE, emit, spawn_typing_task},
     matrix::{MatrixCore, core::OpenTimeline},
@@ -184,6 +187,11 @@ fn convert_diff(
 // ---------------------------------------------------------------------------
 
 fn build_message(options: &SendOptions) -> RoomMessageEventContent {
+    let content = build_plain_message(options);
+    with_emotes(content, &options.emotes)
+}
+
+fn build_plain_message(options: &SendOptions) -> RoomMessageEventContent {
     let body = &options.body;
 
     match options.msgtype.as_deref() {
@@ -211,6 +219,120 @@ fn build_message(options: &SendOptions) -> RoomMessageEventContent {
     }
 }
 
+/// Swap `:shortcode:` for `<img data-mx-emoticon>` in the formatted body.
+///
+/// This runs *after* the message is built, on the HTML rather than on what the
+/// user typed, for two reasons: Markdown has already escaped everything, so an
+/// emote can't be spelled out of a `<` someone typed; and a message keeps both
+/// its formatting and its emotes instead of having to choose.
+///
+/// A message with no emotes in it comes back untouched — no formatted body is
+/// invented for plain text that didn't need one.
+fn with_emotes(
+    mut content: RoomMessageEventContent,
+    emotes: &[EmoteRef],
+) -> RoomMessageEventContent {
+    use matrix_sdk::ruma::events::room::message::FormattedBody;
+
+    if emotes.is_empty() {
+        return content;
+    }
+
+    // Only the text-ish message types have a formatted body to put emotes in.
+    let (body, formatted) = match &content.msgtype {
+        MessageType::Text(m) => (m.body.clone(), m.formatted.clone()),
+        MessageType::Emote(m) => (m.body.clone(), m.formatted.clone()),
+        MessageType::Notice(m) => (m.body.clone(), m.formatted.clone()),
+        _ => return content,
+    };
+
+    // Without a formatted body there's nothing but the plain text, which has to
+    // be escaped before it can carry markup.
+    let source = match &formatted {
+        Some(f) => f.body.clone(),
+        None => escape_html(&body),
+    };
+
+    let Some(html) = substitute_emotes(&source, emotes) else {
+        return content;
+    };
+
+    let formatted = FormattedBody::html(html);
+    match &mut content.msgtype {
+        MessageType::Text(m) => m.formatted = Some(formatted),
+        MessageType::Emote(m) => m.formatted = Some(formatted),
+        MessageType::Notice(m) => m.formatted = Some(formatted),
+        _ => {}
+    }
+
+    content
+}
+
+/// Replace every `:shortcode:` outside a tag, or `None` if there were none.
+///
+/// Scanning past anything between `<` and `>` keeps a shortcode that happens to
+/// appear inside an attribute — an autolinked URL, most plausibly — from being
+/// rewritten into markup in the middle of a tag.
+fn substitute_emotes(html: &str, emotes: &[EmoteRef]) -> Option<String> {
+    let patterns: Vec<(String, &EmoteRef)> = emotes
+        .iter()
+        .filter(|emote| !emote.shortcode.is_empty() && emote.url.starts_with("mxc://"))
+        .map(|emote| (format!(":{}:", emote.shortcode), emote))
+        .collect();
+
+    let mut out = String::with_capacity(html.len());
+    let mut replaced = false;
+    let mut in_tag = false;
+    let mut at = 0;
+
+    while at < html.len() {
+        let c = html[at..].chars().next().expect("at is a char boundary");
+
+        if in_tag {
+            in_tag = c != '>';
+            out.push(c);
+            at += c.len_utf8();
+            continue;
+        }
+
+        if c == '<' {
+            in_tag = true;
+            out.push(c);
+            at += c.len_utf8();
+            continue;
+        }
+
+        let matched = (c == ':')
+            .then(|| patterns.iter().find(|(pattern, _)| html[at..].starts_with(pattern)))
+            .flatten();
+
+        match matched {
+            Some((pattern, emote)) => {
+                let code = &emote.shortcode;
+                out.push_str(&format!(
+                    "<img data-mx-emoticon height=\"32\" src=\"{}\" alt=\":{code}:\" title=\":{code}:\" />",
+                    escape_html(&emote.url),
+                ));
+                at += pattern.len();
+                replaced = true;
+            }
+            None => {
+                out.push(c);
+                at += c.len_utf8();
+            }
+        }
+    }
+
+    replaced.then_some(out)
+}
+
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 pub async fn send(
     core: &MatrixCore,
     room_id: &RoomId,
@@ -234,6 +356,44 @@ pub async fn send(
         }
     }
 
+    Ok(())
+}
+
+/// Send one image from a pack as an `m.sticker`.
+///
+/// Stickers are their own event type rather than an `m.image` message, which is
+/// what makes other clients draw them small and without a filename. The URL is
+/// the pack's — already on the server — so nothing is uploaded here.
+pub async fn send_sticker(
+    core: &MatrixCore,
+    room_id: &RoomId,
+    thread_root: Option<&str>,
+    sticker: StickerOptions,
+) -> Result<()> {
+    use matrix_sdk::ruma::{
+        MxcUri,
+        events::{AnyMessageLikeEventContent, room::ImageInfo, sticker::StickerEventContent},
+    };
+
+    if !sticker.url.starts_with("mxc://") {
+        return Err(Error::Other("that sticker isn't on this server".into()));
+    }
+
+    let timeline = get(core, room_id, thread_root).await?;
+
+    let mut info = ImageInfo::new();
+    info.width = sticker.width.map(Into::into);
+    info.height = sticker.height.map(Into::into);
+    info.size = sticker.size.map(Into::into);
+    info.mimetype = sticker.mimetype;
+
+    let content = StickerEventContent::new(
+        sticker.body,
+        info,
+        <&MxcUri>::from(sticker.url.as_str()).to_owned(),
+    );
+
+    timeline.send(AnyMessageLikeEventContent::Sticker(content)).await?;
     Ok(())
 }
 
@@ -403,6 +563,81 @@ fn safe_filename(filename: &str) -> String {
         .trim_matches(|c: char| c == '.' || c.is_whitespace() || c.is_control());
 
     if trimmed.is_empty() { "attachment".to_owned() } else { trimmed.to_owned() }
+}
+
+#[cfg(test)]
+mod emote_tests {
+    use super::{EmoteRef, substitute_emotes};
+
+    fn blobcat() -> Vec<EmoteRef> {
+        vec![
+            EmoteRef { shortcode: "blobcat".into(), url: "mxc://veil.gg/cat".into() },
+            EmoteRef { shortcode: "uwu".into(), url: "mxc://veil.gg/uwu".into() },
+        ]
+    }
+
+    #[test]
+    fn replaces_a_shortcode_with_an_emoticon_image() {
+        let html = substitute_emotes("hello :blobcat:", &blobcat()).expect("a replacement");
+        assert!(html.starts_with("hello <img data-mx-emoticon "));
+        assert!(html.contains("src=\"mxc://veil.gg/cat\""));
+        // The shortcode stays as alt text, so clients without the pack still
+        // read `:blobcat:` rather than nothing.
+        assert!(html.contains("alt=\":blobcat:\""));
+    }
+
+    #[test]
+    fn leaves_text_with_no_emotes_alone() {
+        assert!(substitute_emotes("nothing here", &blobcat()).is_none());
+        // A shortcode we don't have is somebody else's, or a typo. Either way
+        // it stays as written.
+        assert!(substitute_emotes("what about :nope:", &blobcat()).is_none());
+    }
+
+    #[test]
+    fn keeps_the_markdown_it_was_given() {
+        let html =
+            substitute_emotes("<strong>yes</strong> :uwu:", &blobcat()).expect("a replacement");
+        assert!(html.starts_with("<strong>yes</strong> <img "));
+    }
+
+    #[test]
+    fn never_writes_into_a_tag() {
+        // An autolinked URL that happens to contain a shortcode must not have
+        // an <img> spliced into the middle of its href.
+        let source = "<a href=\"https://x.example/:blobcat:\">link</a> and :blobcat:";
+        let html = substitute_emotes(source, &blobcat()).expect("a replacement");
+
+        assert!(html.contains("href=\"https://x.example/:blobcat:\""));
+        assert_eq!(html.matches("<img").count(), 1);
+    }
+
+    #[test]
+    fn replaces_every_occurrence() {
+        let html = substitute_emotes(":uwu: :uwu: :blobcat:", &blobcat()).expect("replacements");
+        assert_eq!(html.matches("<img").count(), 3);
+    }
+
+    #[test]
+    fn survives_text_that_isnt_ascii() {
+        let html = substitute_emotes("labas 👋 :uwu: ačiū", &blobcat()).expect("a replacement");
+        assert!(html.starts_with("labas 👋 <img"));
+        assert!(html.ends_with(" ačiū"));
+    }
+
+    #[test]
+    fn ignores_an_emote_whose_url_isnt_on_a_homeserver() {
+        let remote = vec![EmoteRef {
+            shortcode: "tracker".into(),
+            url: "https://evil.example/pixel.gif".into(),
+        }];
+        assert!(substitute_emotes("hi :tracker:", &remote).is_none());
+    }
+
+    #[test]
+    fn a_lone_colon_is_just_a_colon() {
+        assert!(substitute_emotes("ratio 3:1, right", &blobcat()).is_none());
+    }
 }
 
 #[cfg(test)]
