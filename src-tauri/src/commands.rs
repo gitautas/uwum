@@ -186,11 +186,20 @@ pub async fn set_room_low_priority(
 
 #[tauri::command]
 pub async fn set_room_muted(
+    app: AppHandle,
     state: State<'_, AppState>,
     room_id: String,
     muted: bool,
 ) -> Result<()> {
-    rooms::set_muted(&*state.core().await?, &parse_room_id(&room_id)?, muted).await
+    let core = state.core().await?;
+    let room_id = parse_room_id(&room_id)?;
+
+    rooms::set_muted(&core, &room_id, muted).await?;
+    // Muting writes push rules, which the room-list stream has no reason to
+    // report; without this the toggle only catches up when something else about
+    // the room changes.
+    rooms::emit_room_refresh(&app, &core, &room_id).await;
+    Ok(())
 }
 
 #[tauri::command]

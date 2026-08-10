@@ -48,16 +48,16 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
   const joined = members ?? [];
   const unverified = joined.filter((m) => m.verification !== "verified").length;
 
+  // The room toggles were all swallowing their errors, so one that failed
+  // server-side looked exactly like a button that did nothing.
+  const toggle = (request: Promise<void>) =>
+    request.catch((e) => showBanner("error", ipc.asUwuError(e).message));
+
   // A DM is a person, so the top of the panel should be them rather than a
   // room avatar and a room ID. Not every direct room has exactly one other
   // member — you can be alone in one, or still be flagged direct after others
   // joined — so this falls back to the room header whenever it isn't obvious
   // who the DM is with.
-  // These were all swallowing their errors, so a toggle that failed server-side
-  // looked exactly like a button that did nothing.
-  const toggle = (request: Promise<void>) =>
-    request.catch((e) => showBanner("error", ipc.asUwuError(e).message));
-
   const others = joined.filter((m) => m.userId !== ownUserId);
   const partner = room.isDirect && others.length === 1 ? others[0] : undefined;
 
