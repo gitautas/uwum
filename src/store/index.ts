@@ -484,6 +484,9 @@ export function filterRooms(
 
   const visible = rooms.filter((room) => {
     if (room.isSpace) return false;
+    // Rooms that exist to hold something — an image pack, say — are not places
+    // anyone talks, so they don't belong in a list of conversations.
+    if (room.isUtility) return false;
     if (room.membership === "left" || room.membership === "banned") return false;
 
     if (activeSpaceId) {

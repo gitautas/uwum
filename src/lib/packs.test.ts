@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   emoteLookup,
+  imageLookup,
   emoteRefs,
   matchEmotes,
   reactionImage,
@@ -67,6 +68,18 @@ describe("emoteLookup", () => {
   });
 });
 
+describe("imageLookup", () => {
+  it("includes images the emote picker wouldn't offer", () => {
+    // A sticker-only image still has a name, and a reaction carrying that name
+    // has to be drawable — otherwise it shows as `:endurance:`.
+    const sticker = image("endurance", { isEmoticon: false, isSticker: true });
+    const lookup = imageLookup([pack("user", [sticker])]);
+
+    expect(lookup.get("endurance")).toBe(sticker);
+    expect(emoteLookup([pack("user", [sticker])]).size).toBe(0);
+  });
+});
+
 describe("emoteRefs", () => {
   it("hands over just what the backend substitutes with", () => {
     expect(emoteRefs([pack("user", [image("uwu")])])).toEqual([
@@ -105,8 +118,8 @@ describe("reactionKeyFor", () => {
 
   it("sends a custom emote as its address, the way other clients do", () => {
     // Reactions aggregate on exact string equality, so this is what decides
-    // whether reacting with the same emote as a FluffyChat user makes one pile
-    // or two.
+    // whether reacting with the same emote as someone on another client makes
+    // one pile or two.
     const key = reactionKeyFor({ kind: "emote", image: image("blobcat") });
     expect(key).toBe("mxc://veil.gg/blobcat");
   });

@@ -25,6 +25,7 @@ import {
 import { mediaUrl } from "../lib/ipc";
 import {
   emoteLookup,
+  imageLookup,
   matchEmotes,
   reactionImage,
   stickersOf,
@@ -102,7 +103,10 @@ export function EmojiPicker({
     };
   }, [onClose]);
 
+  // What you may pick, and what a remembered key might mean. The second is
+  // wider: a shortcode remembered from a sticker-only pack should still draw.
   const lookup = useMemo(() => emoteLookup(packs), [packs]);
+  const known = useMemo(() => imageLookup(packs), [packs]);
 
   const sections = useMemo<Section[]>(() => {
     const out: Section[] = [];
@@ -166,7 +170,7 @@ export function EmojiPicker({
    */
   function pickRecent(key: string) {
     const code = /^:([^\s:]+):$/.exec(key)?.[1];
-    const image = code ? lookup.get(code) : undefined;
+    const image = code ? known.get(code) : undefined;
     onPick(image ? { kind: "emote", image } : { kind: "unicode", emoji: key });
   }
 
@@ -288,7 +292,7 @@ export function EmojiPicker({
                     <RecentCell
                       key={key}
                       value={key}
-                      lookup={lookup}
+                      lookup={known}
                       onClick={() => pickRecent(key)}
                       onHover={setHovered}
                     />

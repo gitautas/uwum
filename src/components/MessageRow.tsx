@@ -11,7 +11,7 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
-import { emoteLookup, reactionImage, reactionKeyFor } from "../lib/packs";
+import { imageLookup, reactionImage, reactionKeyFor } from "../lib/packs";
 import { renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
 import { useStore } from "../store";
@@ -44,7 +44,9 @@ export function MessageRow({
   const recentReactions = useStore((s) => s.settings.recentReactions);
   const noteReactionUsed = useStore((s) => s.noteReactionUsed);
   const packs = useStore((s) => s.packs);
-  const emotes = useMemo(() => emoteLookup(packs), [packs]);
+  // Every image, not just the ones usable as emotes: this is for reading what
+  // somebody else sent, and they may have reacted with anything.
+  const emotes = useMemo(() => imageLookup(packs), [packs]);
   const senderAnchor = useProfileAnchor(item.sender);
 
   const author = displayNameFor(item.sender, item.senderName);

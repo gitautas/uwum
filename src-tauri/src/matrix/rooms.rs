@@ -38,6 +38,17 @@ fn membership_state_str(state: &MembershipState) -> &'static str {
     }
 }
 
+/// Whether a room exists to hold data rather than a conversation.
+///
+/// A room type other than "a room" means some client made it for a purpose of
+/// its own — ours makes them to hold image packs. Spaces are excluded because
+/// they're a type we do draw, in their own rail.
+fn is_utility_room(room: &Room) -> bool {
+    use matrix_sdk::ruma::room::RoomType;
+
+    !matches!(room.room_type(), None | Some(RoomType::Space))
+}
+
 pub fn membership_str(state: RoomState) -> &'static str {
     match state {
         RoomState::Joined => "joined",
@@ -144,6 +155,7 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         is_direct,
         is_encrypted: room.encryption_state().is_encrypted(),
         is_space: room.is_space(),
+        is_utility: is_utility_room(room),
         is_favourite: room.is_favourite(),
         is_low_priority: room.is_low_priority(),
         is_muted: muted,
@@ -304,6 +316,7 @@ async fn summarise_or_placeholder(room: &Room) -> RoomSummary {
                 is_direct: false,
                 is_encrypted: false,
                 is_space: false,
+                is_utility: false,
                 is_favourite: false,
                 is_low_priority: false,
                 is_muted: false,

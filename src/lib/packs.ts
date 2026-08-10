@@ -34,6 +34,27 @@ export function emoteLookup(packs: ImagePack[]): Map<string, PackImage> {
   return out;
 }
 
+/**
+ * Shortcode → image across *every* image, whatever it's for.
+ *
+ * Used to work out what a shortcode someone sent stands for, which is a
+ * different question from what this person may type. A pack marked stickers-only
+ * still has names, and a reaction carrying one of those names should be drawn
+ * rather than left as `:endurance:` because it wouldn't have appeared in the
+ * emote picker.
+ */
+export function imageLookup(packs: ImagePack[]): Map<string, PackImage> {
+  const out = new Map<string, PackImage>();
+
+  for (const pack of packs) {
+    for (const image of pack.images) {
+      if (!out.has(image.shortcode)) out.set(image.shortcode, image);
+    }
+  }
+
+  return out;
+}
+
 /** The emotes to offer the backend when sending, so it can substitute them. */
 export function emoteRefs(packs: ImagePack[]): { shortcode: string; url: string }[] {
   return [...emoteLookup(packs)].map(([shortcode, image]) => ({
@@ -61,10 +82,15 @@ export function reactionShortcode(key: string): string | null {
 /**
  * The reaction key a pick should be sent as.
  *
- * A custom emote goes in as the image's own address, which is what FluffyChat
- * and Cinny send: reactions aggregate on exact string equality, so matching
- * them means one pile instead of two of one each. Read the other way round by
- * `reactionImage`, which is why the two live together.
+ * A custom emote goes in as the image's own address, which is what the clients
+ * this account's friends use send: reactions aggregate on exact string
+ * equality, so matching them is what decides whether the same emote makes one
+ * pile or two. Read the other way round by `reactionImage`, which is why the
+ * two live together.
+ *
+ * Not every client agrees — some send `:shortcode:` and show nothing useful for
+ * an address. There is no key that satisfies both, so this follows the one we
+ * have evidence for.
  *
  * Stickers aren't reactable — a reaction is a string — so they never reach
  * here; a caller that asks anyway gets the sticker's address, which at least
@@ -89,8 +115,8 @@ export interface ReactionImage {
  *
  * * `:blobcat:` — the shortcode, which needs the pack to mean anything, and
  *   reads as those characters everywhere else.
- * * `mxc://…` — the image's own address, which FluffyChat and others send, and
- *   so do we. Nothing has to be looked up: the key *is* the picture.
+ * * `mxc://…` — the image's own address, which FluffyChat sends and so do we.
+ *   Nothing has to be looked up: the key *is* the picture.
  *
  * Both are drawn as the image. An mxc key is named from the pack when we happen
  * to have that image, since `:blobcat:` is a better tooltip than a media ID,

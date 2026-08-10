@@ -69,6 +69,8 @@ export interface RoomSummary {
   isDirect: boolean;
   isEncrypted: boolean;
   isSpace: boolean;
+  /** A room that holds data rather than a conversation — an image pack, say. */
+  isUtility: boolean;
   isFavourite: boolean;
   isLowPriority: boolean;
   isMuted: boolean;
@@ -339,6 +341,8 @@ export interface SharedRoom {
   name: string;
   avatarUrl: string | null;
   isSpace: boolean;
+  /** A room that holds data rather than a conversation — an image pack, say. */
+  isUtility: boolean;
   isDirect: boolean;
 }
 

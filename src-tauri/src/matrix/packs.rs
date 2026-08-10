@@ -53,6 +53,14 @@ pub const ROOM_PACK_LEGACY: &str = "im.ponies.room_emotes";
 pub const PACK_ROOMS: &str = "m.image_pack.rooms";
 pub const PACK_ROOMS_LEGACY: &str = "im.ponies.emote_rooms";
 
+/// The room type given to a room that exists only to hold a pack.
+///
+/// Room types are how Matrix says "this isn't a conversation" — `m.space` is
+/// one. There's no standard type for a pack room, so this is ours; clients that
+/// don't know it should leave the room out of their room list, which is exactly
+/// what we want them to do.
+pub const PACK_ROOM_TYPE: &str = "gg.veil.uwum.image_pack";
+
 // ---------------------------------------------------------------------------
 // the wire format
 // ---------------------------------------------------------------------------
@@ -648,23 +656,12 @@ pub async fn create_personal_pack(core: &MatrixCore, name: &str) -> Result<Strin
         return Err(Error::Other("give the pack a name first~".into()));
     }
 
-    let created = super::rooms::create(
-        core,
-        super::rooms::NewRoom {
-            name: name.to_owned(),
-            topic: Some("holds an image pack".to_owned()),
-            is_public: false,
-            alias: None,
-            encrypted: false,
-            invite: Vec::new(),
-            parent_space: None,
-        },
-    )
-    .await?;
+    use matrix_sdk::ruma::{
+        api::client::room::{Visibility, create_room},
+        serde::Raw,
+    };
 
-    let room_id = RoomId::parse(&created.room_id)?;
     let state_key = state_key_for(name);
-
     let content = ImagePackContent {
         pack: Some(PackInfo {
             display_name: Some(name.to_owned()),
@@ -672,11 +669,51 @@ pub async fn create_personal_pack(core: &MatrixCore, name: &str) -> Result<Strin
         }),
         ..ImagePackContent::default()
     };
+    let content = serde_json::to_value(&content).map_err(|e| Error::Other(e.to_string()))?;
 
-    save_room_pack(core, &room_id, &state_key, content).await?;
+    let mut request = create_room::v3::Request::new();
+    request.name = Some(name.to_owned());
+    request.topic = Some("holds an image pack".to_owned());
+    request.preset = Some(create_room::v3::RoomPreset::PrivateChat);
+    request.visibility = Visibility::Private;
+
+    // The pack goes in as creation state rather than being sent afterwards, so
+    // that it arrives with the room in the first sync. Sent after, it wouldn't
+    // be in the store when the settings screen re-reads a moment later, and the
+    // pack it just made would appear to have not been made.
+    request.initial_state = [ROOM_PACK, ROOM_PACK_LEGACY]
+        .into_iter()
+        .map(|event_type| {
+            Raw::new(&serde_json::json!({
+                "type": event_type,
+                "state_key": state_key,
+                "content": content,
+            }))
+            .map(Raw::cast_unchecked)
+            .map_err(|e| Error::Other(e.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    // A room type marks this as something other than a conversation, the way
+    // `m.space` does. Clients that don't recognise it — including our own room
+    // list — know to leave it out of the sidebar.
+    request.creation_content = Some(
+        Raw::new(&serde_json::json!({ "type": PACK_ROOM_TYPE }))
+            .map(Raw::cast_unchecked)
+            .map_err(|e| Error::Other(e.to_string()))?,
+    );
+
+    let room = core.client.create_room(request).await?;
+    let room_id = room.room_id().to_owned();
+
     set_everywhere(core, &room_id, &state_key, true).await?;
 
-    Ok(created.room_id)
+    // The room list is fed by sync, so the pack isn't readable the instant the
+    // server says yes. Waiting for it here is what lets the caller re-read and
+    // actually see what it just made.
+    core.client.await_room_remote_echo(&room_id).await;
+
+    Ok(room_id.to_string())
 }
 
 /// A readable, room-unique state key for a new pack.
