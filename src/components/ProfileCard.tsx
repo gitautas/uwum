@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { accentFor, displayNameFor } from "../lib/display";
+import { displayNameFor } from "../lib/display";
 import * as ipc from "../lib/ipc";
-import { mediaUrl } from "../lib/ipc";
+import { cachedProfile, loadProfile } from "../lib/profiles";
 import type { Profile, SharedRoom, UserContext } from "../lib/types";
 import { useStore } from "../store";
+import { ProfileHeader } from "./ProfileHeader";
 import { Avatar, Icon, RaveLabel, Spinner, Tag } from "./ui";
 
 const WIDTH = 320;
@@ -91,13 +92,14 @@ export function AvatarButton({
 }
 
 function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const [profile, setProfile] = useState<Profile | null>(
+    () => cachedProfile(userId) ?? null,
+  );
   const [context, setContext] = useState<UserContext | null>(null);
   const [opening, setOpening] = useState(false);
 
   const closeProfile = useStore((s) => s.closeProfile);
   const openSettings = useStore((s) => s.openSettings);
-  const openLightbox = useStore((s) => s.openLightbox);
   const selectRoom = useStore((s) => s.selectRoom);
   const showBanner = useStore((s) => s.showBanner);
 
@@ -107,8 +109,7 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
   useEffect(() => {
     let cancelled = false;
 
-    ipc
-      .getProfile(userId)
+    loadProfile(userId)
       .then((p) => !cancelled && setProfile(p))
       .catch(() => {});
     ipc
@@ -150,7 +151,6 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
   }, [closeProfile]);
 
   const name = displayNameFor(userId, profile?.displayName ?? null);
-  const cover = mediaUrl(profile?.coverUrl, { width: WIDTH, height: 88 });
   const verified = context?.verification === "verified";
   const isMe = context?.isMe ?? false;
   const shared = context?.sharedRooms ?? [];
@@ -193,94 +193,18 @@ function Card({ userId, anchor }: { userId: string; anchor: DOMRect }) {
         boxShadow: "var(--shadow-pop)",
       }}
     >
-      <div
-        onClick={() =>
-          profile?.coverUrl && openLightbox(profile.coverUrl, `${name}'s cover`)
-        }
-        style={{
-          height: 88,
-          cursor: profile?.coverUrl ? "zoom-in" : "default",
-          background: cover
-            ? `center/cover no-repeat url("${cover}")`
-            : accentFor(userId),
-        }}
+      <ProfileHeader
+        userId={userId}
+        profile={profile}
+        name={name}
+        width={WIDTH}
+        badge={verified ? <Tag icon="seal-check">verified</Tag> : null}
       />
 
       <div style={{ padding: "0 16px 16px" }}>
-        <div
-          style={{
-            marginTop: -30,
-            marginBottom: 10,
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-          }}
-        >
-          <button
-            onClick={() =>
-              profile?.avatarUrl && openLightbox(profile.avatarUrl, name)
-            }
-            aria-label={`${name}'s picture, full size`}
-            style={{
-              display: "flex",
-              padding: 0,
-              cursor: profile?.avatarUrl ? "zoom-in" : "default",
-            }}
-          >
-            <Avatar
-              id={userId}
-              name={name}
-              mxc={profile?.avatarUrl}
-              size={66}
-              radius={22}
-              style={{ border: "3px solid var(--surface-card-raised)" }}
-            />
-          </button>
-          {verified && <Tag icon="seal-check">verified</Tag>}
-        </div>
-
-        <div
-          style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 800,
-            fontSize: 19,
-            lineHeight: 1.2,
-          }}
-        >
-          {name}
-        </div>
-        <div
-          className="selectable"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-            wordBreak: "break-all",
-          }}
-        >
-          {userId}
-        </div>
-
         {!profile && !context && (
           <div style={{ display: "flex", justifyContent: "center", padding: 16 }}>
             <Spinner size={14} />
-          </div>
-        )}
-
-        {profile?.status && (
-          <div
-            className="selectable"
-            style={{
-              marginTop: 11,
-              padding: "7px 11px",
-              borderRadius: 12,
-              background: "var(--surface-inset)",
-              fontSize: 13,
-              color: "var(--text-secondary)",
-              wordBreak: "break-word",
-            }}
-          >
-            {profile.status}
           </div>
         )}
 
