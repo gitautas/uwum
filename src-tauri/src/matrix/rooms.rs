@@ -11,7 +11,7 @@ use matrix_sdk::{
     },
 };
 use matrix_sdk_ui::room_list_service::filters;
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::task::JoinHandle;
 
 use crate::{
@@ -227,11 +227,38 @@ pub fn spawn_room_list_task(app: AppHandle, core: Arc<MatrixCore>) -> JoinHandle
                 RoomsUpdate { seq: mirror.seq, diffs: converted }
             };
 
-            if let Err(e) = app.emit(EV_ROOMS, &update) {
-                tracing::warn!("couldn't emit room list update: {e}");
-            }
+            crate::events::emit(&app, EV_ROOMS, update);
         }
     })
+}
+
+/// Push a fresh summary of one room, as if the room list had reported it.
+///
+/// The sidebar's stream only emits a diff when the SDK marks a room's info
+/// notable, and notification settings aren't room state — they're global push
+/// rules — so nothing about muting reaches the UI on its own. Favourite and low
+/// priority are room account data, which is why those toggles look like they
+/// work and the mute one doesn't.
+///
+/// Folding into the mirror under the same lock the stream uses keeps `seq`
+/// meaning what it claims to: batch N is the Nth change to the list.
+pub async fn emit_room_refresh(app: &AppHandle, core: &MatrixCore, room_id: &RoomId) {
+    let Ok(room) = core.room(&room_id.to_owned()) else { return };
+    let value = summarise_or_placeholder(&room).await;
+
+    let update = {
+        let mut mirror = core.rooms.lock().await;
+        // A room the UI doesn't list has nothing to update: emitting a `Set`
+        // for an index we made up would shuffle somebody else's row.
+        let Some(index) = mirror.rooms.iter().position(|r| r.id == value.id) else {
+            return;
+        };
+        mirror.rooms[index] = value.clone();
+        mirror.seq += 1;
+        RoomsUpdate { seq: mirror.seq, diffs: vec![Diff::Set { index, value }] }
+    };
+
+    crate::events::emit(app, EV_ROOMS, update);
 }
 
 /// Replay a diff onto the mirror. Index-bearing operations are bounds-checked:
@@ -681,40 +708,51 @@ pub async fn set_muted(core: &MatrixCore, room_id: &RoomId, muted: bool) -> Resu
     use matrix_sdk::notification_settings::{IsEncrypted, IsOneToOne, RoomNotificationMode};
 
     let settings = core.client.notification_settings().await;
+    let room = core.room(&room_id.to_owned())?;
 
-    if muted {
-        return settings
-            .set_room_notification_mode(room_id, RoomNotificationMode::Mute)
-            .await
-            .map_err(|e| Error::Other(e.to_string()));
+    let result = if muted {
+        settings.set_room_notification_mode(room_id, RoomNotificationMode::Mute).await
+    } else {
+        // Unmuting is `unmute_room`, not "delete the room's push rules".
+        //
+        // Deleting outright asks the server to remove whatever rules the SDK's
+        // *cached* ruleset believes exist, and when that cache and the server
+        // disagree the DELETE comes back 404 — at which point the SDK never
+        // applies the change to its cache either, so the room stays muted
+        // locally and every further click repeats the same doomed request.
+        // That's the stream of `Push rule not found` in the log.
+        //
+        // `unmute_room` asks the question first: already unmuted, nothing to do;
+        // muted by a rule, remove it; muted only because that's the default for
+        // this kind of room, write an explicit "all messages" rule instead. It
+        // also needs to know what kind of room this is to work out that default.
+        let encrypted = if room.encryption_state().is_encrypted() {
+            IsEncrypted::Yes
+        } else {
+            IsEncrypted::No
+        };
+        let one_to_one =
+            if room.joined_members_count() == 2 { IsOneToOne::Yes } else { IsOneToOne::No };
+
+        settings.unmute_room(room_id, encrypted, one_to_one).await
+    };
+    result.map_err(|e| Error::Other(e.to_string()))?;
+
+    // `summarise` reads the mode from a per-room cache that the SDK only
+    // refills when a sync brings the new `m.push_rules` back, so a summary
+    // taken now would still report the old state. The rules read here are the
+    // SDK's own, already updated by the call above, so this doesn't wait on the
+    // server either.
+    //
+    // Not every unmute leaves a rule behind — dropping one that only duplicated
+    // the default leaves no user-defined mode at all — and the "update" half of
+    // the SDK's cache API can't express that, hence the clear.
+    match settings.get_user_defined_room_notification_mode(room_id).await {
+        Some(mode) => room.update_cached_user_defined_notification_mode(mode),
+        None => room.clear_user_defined_notification_mode(),
     }
 
-    // Unmuting is `unmute_room`, not "delete the room's push rules".
-    //
-    // Deleting outright asks the server to remove whatever rules the SDK's
-    // *cached* ruleset believes exist, and when that cache and the server
-    // disagree the DELETE comes back 404 — at which point the SDK never applies
-    // the change to its cache either, so the room stays muted locally and every
-    // further click repeats the same doomed request. That's the stream of
-    // `Push rule not found` in the log.
-    //
-    // `unmute_room` asks the question first: already unmuted, nothing to do;
-    // muted by a rule, remove it; muted only because that's the default for
-    // this kind of room, write an explicit "all messages" rule instead. It also
-    // needs to know what kind of room this is to work out that default.
-    let room = core.room(&room_id.to_owned())?;
-    let encrypted = if room.encryption_state().is_encrypted() {
-        IsEncrypted::Yes
-    } else {
-        IsEncrypted::No
-    };
-    let one_to_one =
-        if room.joined_members_count() == 2 { IsOneToOne::Yes } else { IsOneToOne::No };
-
-    settings
-        .unmute_room(room_id, encrypted, one_to_one)
-        .await
-        .map_err(|e| Error::Other(e.to_string()))
+    Ok(())
 }
 
 pub async fn invite(core: &MatrixCore, room_id: &RoomId, user_id: &str) -> Result<()> {
