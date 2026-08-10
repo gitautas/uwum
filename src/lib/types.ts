@@ -450,6 +450,36 @@ export interface ImagePack {
   canEdit: boolean;
 }
 
+/** Which pack an edit is aimed at — the personal one has no room. */
+export interface PackTarget {
+  roomId?: string | null;
+  stateKey?: string | null;
+}
+
+/** One change to a pack, applied on top of whatever the server has. */
+export type PackEdit =
+  | {
+      kind: "putImage";
+      shortcode: string;
+      url: string;
+      body?: string | null;
+      isEmoticon: boolean;
+      isSticker: boolean;
+      width?: number | null;
+      height?: number | null;
+      size?: number | null;
+      mimetype?: string | null;
+    }
+  | { kind: "rename"; from: string; to: string }
+  | { kind: "removeImage"; shortcode: string }
+  | { kind: "setName"; name: string };
+
+/** A room a shared pack could live in. */
+export interface PackRoom {
+  id: string;
+  name: string;
+}
+
 /** One image from a pack, on its way out as an `m.sticker`. */
 export interface StickerOptions {
   body: string;

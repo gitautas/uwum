@@ -18,6 +18,9 @@ import type {
   ImagePack,
   NewRoom,
   NewRoomResult,
+  PackEdit,
+  PackRoom,
+  PackTarget,
   RecoveryStatus,
   RoomMember,
   RoomPermissions,
@@ -172,6 +175,21 @@ export const sendSticker = (
  */
 export const getImagePacks = (roomId?: string) =>
   invoke<ImagePack[]>("get_image_packs", { roomId: roomId ?? null });
+
+/** Every pack on the account, including ones not turned on. */
+export const getAllImagePacks = () => invoke<ImagePack[]>("get_all_image_packs");
+
+/** Rooms this account may put a shared pack in. */
+export const getPackRooms = () => invoke<PackRoom[]>("get_pack_rooms");
+
+export const editImagePack = (target: PackTarget, edit: PackEdit) =>
+  invoke<void>("edit_image_pack", {
+    target: { roomId: target.roomId ?? null, stateKey: target.stateKey ?? null },
+    edit,
+  });
+
+export const setPackEverywhere = (roomId: string, stateKey: string, everywhere: boolean) =>
+  invoke<void>("set_pack_everywhere", { roomId, stateKey, everywhere });
 
 /** Resolves to `true` once there's nothing older left to load. */
 export const paginateBack = (roomId: string, threadRoot?: string) =>
