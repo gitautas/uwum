@@ -13,6 +13,41 @@ function run(command, args) {
   execFileSync(command, args, { stdio: "inherit" });
 }
 
+// Captures stdout instead of inheriting it, for the preflight checks.
+function capture(command, args) {
+  return execFileSync(command, args, { encoding: "utf8" }).trim();
+}
+
+function fail(message) {
+  console.error(`\nAborting: ${message}`);
+  process.exit(1);
+}
+
+// Everything below runs before a single file is touched, so a failed check
+// never leaves behind a half-made release to unpick by hand.
+
+// The push target is whatever the current branch already tracks, so this works
+// in a fork (origin) and in the source repo alike without hardcoding a name.
+let remote;
+try {
+  remote = capture("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]).split("/")[0];
+} catch {
+  fail("current branch has no upstream. Push it once with `git push -u origin HEAD`.");
+}
+
+if (capture("git", ["status", "--porcelain"])) {
+  fail("working tree is dirty. Commit or stash first — a release commit should only contain the version bump.");
+}
+
+const branch = capture("git", ["rev-parse", "--abbrev-ref", "HEAD"]);
+
+// A tag on a stale branch builds code that isn't what's on the remote.
+run("git", ["fetch", remote, branch]);
+
+if (capture("git", ["rev-parse", "HEAD"]) !== capture("git", ["rev-parse", `${remote}/${branch}`])) {
+  fail(`${branch} is out of sync with ${remote}/${branch}. Pull or push first.`);
+}
+
 function getVersion() {
   const cargo = fs.readFileSync("src-tauri/Cargo.toml", "utf8");
 
@@ -35,6 +70,14 @@ function bumpVersion(version, type) {
 
 const currentVersion = getVersion();
 const newVersion = bumpVersion(currentVersion, type);
+const tag = `v${newVersion}`;
+
+// Re-tagging a version that already shipped would collide with its GitHub release.
+const existingTags = capture("git", ["tag", "--list", tag]);
+
+if (existingTags) {
+  fail(`tag ${tag} already exists locally.`);
+}
 
 console.log(`Bumping ${currentVersion} → ${newVersion}`);
 
@@ -72,13 +115,25 @@ if (fs.existsSync("package-lock.json")) {
   run("git", ["add", "package-lock.json"]);
 }
 
-run("git", ["commit", "-m", `chore: release v${newVersion}`]);
+run("git", ["commit", "-m", `chore: release ${tag}`]);
 
 // Create tag
-run("git", ["tag", `v${newVersion}`]);
+run("git", ["tag", tag]);
 
-// Push commit and tag
-run("git", ["push", "upstream", "HEAD"]);
-run("git", ["push", "upstream", `v${newVersion}`]);
+// The commit goes first: pushing the tag is what starts the release workflow,
+// and it checks out the tag, so the bump must already be on the remote.
+run("git", ["push", remote, "HEAD"]);
+run("git", ["push", remote, tag]);
 
-console.log(`Released v${newVersion}`);
+const repo = capture("git", ["remote", "get-url", remote])
+  .replace(/^git@github\.com:/, "")
+  .replace(/^https:\/\/github\.com\//, "")
+  .replace(/\.git$/, "");
+
+console.log(`
+Pushed ${tag}. The Release workflow is now building all five platforms
+(~30-90 min). It publishes the release automatically once every platform
+succeeds; until then it stays a draft.
+
+  https://github.com/${repo}/actions/workflows/release.yml
+`);

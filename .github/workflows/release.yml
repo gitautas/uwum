@@ -24,25 +24,39 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # src-tauri/Cargo.toml is the single source of truth for the app version:
+      # tauri.conf.json deliberately omits `version` so the bundlers read it from
+      # Cargo.toml, and scripts/release.mjs bumps Cargo.toml + package.json together.
       - name: Check tag matches app version
         run: |
-          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' src-tauri/Cargo.toml | head -n1)"
           if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
-            echo "::error::Tag ${GITHUB_REF_NAME} does not match src-tauri/tauri.conf.json version ${VERSION} (expected v${VERSION}). Bump the version (tauri.conf.json + package.json), or fix the tag."
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match src-tauri/Cargo.toml version ${VERSION} (expected v${VERSION}). Bump with npm run release:{patch|minor|major}, or fix the tag."
             exit 1
           fi
 
-      - name: Create draft release
+      # Idempotent: re-running a failed release run reuses the draft it already made
+      # instead of failing on the duplicate tag. Draft releases are invisible to
+      # /releases/tags/{tag}, so the lookup has to scan the release list.
+      - name: Create or reuse draft release
         id: create
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
-            -f tag_name="${GITHUB_REF_NAME}" \
-            -f name="uwum ${GITHUB_REF_NAME}" \
-            -F draft=true \
-            -F body=@.github/release-notes.md \
-            --jq '.id')"
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            --jq ".[] | select(.tag_name == \"${GITHUB_REF_NAME}\") | .id" | head -n1)"
+
+          if [ -n "${release_id}" ]; then
+            echo "Reusing existing release ${release_id} for ${GITHUB_REF_NAME}"
+          else
+            release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${GITHUB_REF_NAME}" \
+              -f name="uwum ${GITHUB_REF_NAME}" \
+              -F draft=true \
+              -F body=@.github/release-notes.md \
+              --jq '.id')"
+          fi
+
           echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
 
   build:
@@ -138,3 +152,48 @@ jobs:
             src-tauri/target/**/release/bundle/appimage/*.AppImage
             src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/nsis/*-setup.exe
+
+  publish:
+    # Only after every matrix row uploaded its bundles. If any platform failed,
+    # this is skipped and the draft stays private with whatever did build, so the
+    # run can be re-run without ever showing users a half-populated release.
+    needs: [create-release, build]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Check every platform's assets are attached
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[].name' | sort > assets.txt
+          cat assets.txt
+
+          # One regex per bundle the matrix is expected to produce. Arch spellings
+          # are alternations because Tauri names them differently per bundler
+          # (x64 vs amd64, aarch64 vs arm64) and that naming has drifted before.
+          missing=0
+          for want in 'aarch64\.dmg$' '(x64|x86_64)\.dmg$' \
+                      '(amd64|x86_64)\.deb$' '(arm64|aarch64)\.deb$' \
+                      '(amd64|x86_64)\.AppImage$' '(arm64|aarch64)\.AppImage$' \
+                      '\.msi$' '\-setup\.exe$'; do
+            if ! grep -qiE -- "${want}" assets.txt; then
+              echo "::error::No release asset matched /${want}/"
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ]
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -f make_latest=true \
+            --jq '.html_url'
