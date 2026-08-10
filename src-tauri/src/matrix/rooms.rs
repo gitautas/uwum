@@ -678,15 +678,43 @@ pub async fn set_marked_unread(core: &MatrixCore, room_id: &RoomId, unread: bool
 }
 
 pub async fn set_muted(core: &MatrixCore, room_id: &RoomId, muted: bool) -> Result<()> {
-    use matrix_sdk::notification_settings::RoomNotificationMode;
+    use matrix_sdk::notification_settings::{IsEncrypted, IsOneToOne, RoomNotificationMode};
 
     let settings = core.client.notification_settings().await;
+
     if muted {
-        settings.set_room_notification_mode(room_id, RoomNotificationMode::Mute).await
-    } else {
-        settings.delete_user_defined_room_rules(room_id).await
+        return settings
+            .set_room_notification_mode(room_id, RoomNotificationMode::Mute)
+            .await
+            .map_err(|e| Error::Other(e.to_string()));
     }
-    .map_err(|e| Error::Other(e.to_string()))
+
+    // Unmuting is `unmute_room`, not "delete the room's push rules".
+    //
+    // Deleting outright asks the server to remove whatever rules the SDK's
+    // *cached* ruleset believes exist, and when that cache and the server
+    // disagree the DELETE comes back 404 — at which point the SDK never applies
+    // the change to its cache either, so the room stays muted locally and every
+    // further click repeats the same doomed request. That's the stream of
+    // `Push rule not found` in the log.
+    //
+    // `unmute_room` asks the question first: already unmuted, nothing to do;
+    // muted by a rule, remove it; muted only because that's the default for
+    // this kind of room, write an explicit "all messages" rule instead. It also
+    // needs to know what kind of room this is to work out that default.
+    let room = core.room(&room_id.to_owned())?;
+    let encrypted = if room.encryption_state().is_encrypted() {
+        IsEncrypted::Yes
+    } else {
+        IsEncrypted::No
+    };
+    let one_to_one =
+        if room.joined_members_count() == 2 { IsOneToOne::Yes } else { IsOneToOne::No };
+
+    settings
+        .unmute_room(room_id, encrypted, one_to_one)
+        .await
+        .map_err(|e| Error::Other(e.to_string()))
 }
 
 pub async fn invite(core: &MatrixCore, room_id: &RoomId, user_id: &str) -> Result<()> {

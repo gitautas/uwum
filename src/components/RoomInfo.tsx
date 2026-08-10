@@ -53,6 +53,11 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
   // member — you can be alone in one, or still be flagged direct after others
   // joined — so this falls back to the room header whenever it isn't obvious
   // who the DM is with.
+  // These were all swallowing their errors, so a toggle that failed server-side
+  // looked exactly like a button that did nothing.
+  const toggle = (request: Promise<void>) =>
+    request.catch((e) => showBanner("error", ipc.asUwuError(e).message));
+
   const others = joined.filter((m) => m.userId !== ownUserId);
   const partner = room.isDirect && others.length === 1 ? others[0] : undefined;
 
@@ -180,20 +185,20 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
           label="mute notifications"
           on={room.isMuted}
           colour="var(--status-warning)"
-          onToggle={(next) => void ipc.setRoomMuted(room.id, next).catch(() => {})}
+          onToggle={(next) => void toggle(ipc.setRoomMuted(room.id, next))}
         />
         <IconToggle
           icon="star"
           label="favourite"
           on={room.isFavourite}
           colour="var(--accent-secondary)"
-          onToggle={(next) => void ipc.setRoomFavourite(room.id, next).catch(() => {})}
+          onToggle={(next) => void toggle(ipc.setRoomFavourite(room.id, next))}
         />
         <IconToggle
           icon="arrow-down"
           label="low priority"
           on={room.isLowPriority}
-          onToggle={(next) => void ipc.setRoomLowPriority(room.id, next).catch(() => {})}
+          onToggle={(next) => void toggle(ipc.setRoomLowPriority(room.id, next))}
         />
       </div>
 
