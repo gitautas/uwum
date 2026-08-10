@@ -1,0 +1,140 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Manual runs build the full matrix and attach bundles as run artifacts.
+  # No release is created or touched.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false   # never kill a release run mid-upload
+
+jobs:
+  create-release:
+    # Tag pushes only; workflow_dispatch runs are build-only.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      release_id: ${{ steps.create.outputs.release_id }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches app version
+        run: |
+          VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match src-tauri/tauri.conf.json version ${VERSION} (expected v${VERSION}). Bump the version (tauri.conf.json + package.json), or fix the tag."
+            exit 1
+          fi
+
+      - name: Create draft release
+        id: create
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
+            -f tag_name="${GITHUB_REF_NAME}" \
+            -f name="uwum ${GITHUB_REF_NAME}" \
+            -F draft=true \
+            -F body=@.github/release-notes.md \
+            --jq '.id')"
+          echo "release_id=${release_id}" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: create-release
+    # Run when create-release succeeded (tag push) OR when it was skipped because
+    # this is a manual build-only run. Never run after a create-release failure.
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    permissions:
+      contents: write   # tauri-action uploads release assets
+    strategy:
+      fail-fast: false   # one platform's flake must not kill the other rows
+      matrix:
+        include:
+          - name: macos-aarch64
+            platform: macos-latest          # arm64 image
+            args: '--target aarch64-apple-darwin'
+          - name: macos-x86_64
+            platform: macos-latest          # Intel cross-compiled on arm64
+            args: '--target x86_64-apple-darwin'
+          - name: linux-x86_64
+            platform: ubuntu-22.04          # glibc 2.35 baseline (Ubuntu 22.04 / Debian 12+)
+            args: '--bundles deb,appimage'  # rpm skipped: tauri#11478 (pathologically slow)
+          - name: linux-aarch64
+            platform: ubuntu-22.04-arm      # arm64 runners work in private repos since 2026-01
+            args: '--bundles deb,appimage'
+          - name: windows-x86_64
+            platform: windows-latest        # msi + nsis; no windows-11-arm in private repos
+            args: ''
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libdbus-1-dev pkg-config patchelf xdg-utils
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both Darwin targets on macOS rows (one native, one cross-compiled);
+          # every other row builds the host target only.
+          targets: ${{ startsWith(matrix.platform, 'macos') && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ${{ matrix.name }}   # per-row caches; rows must never share entries
+          # Tag-ref caches can't be restored by future tags, but main-branch caches
+          # can be restored by every ref. Save only on branch runs (dispatch/main);
+          # tag runs restore-only instead of evicting useful caches.
+          save-if: ${{ github.ref_type == 'branch' }}
+
+      - run: npm ci   # tauri-action does not install JS deps; beforeBuildCommand needs them
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS: ad-hoc code signing. Embeds entitlements.plist (mic access under
+          # hardened runtime) and prevents Gatekeeper's "uwum is damaged" dead end
+          # on Apple Silicon downloads. Read only by the macOS bundler.
+          APPLE_SIGNING_IDENTITY: '-'
+          # Windows x64: aws-lc-sys (matrix-sdk -> reqwest -> rustls) needs NASM,
+          # which the runner image lacks. Use AWS's prebuilt CI-verified NASM
+          # objects instead of installing NASM. Read only by aws-lc-sys on Windows.
+          AWS_LC_SYS_PREBUILT_NASM: '1'
+        with:
+          # Empty on workflow_dispatch (create-release skipped) -> build-only mode,
+          # nothing is uploaded anywhere. Populated on tag pushes -> assets upload
+          # into the one pre-created draft (no per-job get-or-create race).
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: ${{ matrix.args }}
+
+      - name: Upload bundles as run artifacts (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: uwum-${{ matrix.name }}
+          if-no-files-found: error   # a row that bundled nothing must fail loudly
+          retention-days: 7          # private-repo artifact storage is billed
+          path: |
+            src-tauri/target/**/release/bundle/dmg/*.dmg
+            src-tauri/target/**/release/bundle/deb/*.deb
+            src-tauri/target/**/release/bundle/appimage/*.AppImage
+            src-tauri/target/**/release/bundle/msi/*.msi
+            src-tauri/target/**/release/bundle/nsis/*-setup.exe
