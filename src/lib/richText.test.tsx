@@ -116,3 +116,39 @@ describe("renderFormattedBody — formatting", () => {
     expect(screen.getByText("cargo test")).toBeTruthy();
   });
 });
+
+describe("renderFormattedBody — custom emotes (MSC2545)", () => {
+  const EMOTE = '<img data-mx-emoticon height="32" src="mxc://veil.gg/blob" alt=":blobcat:">';
+
+  it("draws an inline emote at text height, not at image size", () => {
+    const img = html(`nice ${EMOTE}`).querySelector("img");
+    // The sender's own height attribute is ignored; ours follows the text.
+    expect(img?.style.height).toBe("1.45em");
+  });
+
+  it("goes jumbo when the message is nothing but emotes", () => {
+    const img = html(`${EMOTE} ${EMOTE}`).querySelector("img");
+    expect(img?.style.height).toBe("48px");
+  });
+
+  it("stays inline when a reply fallback is the only other content", () => {
+    const container = html(
+      `<mx-reply><blockquote>quoted</blockquote></mx-reply>${EMOTE}`,
+    );
+    expect(container.querySelector("img")?.style.height).toBe("48px");
+  });
+
+  it("falls back to the shortcode when the source isn't fetchable", () => {
+    const container = html(
+      '<img data-mx-emoticon src="https://evil.example/track.gif" alt=":blobcat:">',
+    );
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.textContent).toBe(":blobcat:");
+  });
+
+  it("leaves ordinary inline images at image size", () => {
+    const img = html('<img src="mxc://veil.gg/pic" alt="a picture">').querySelector("img");
+    expect(img?.style.height).toBe("");
+    expect(img?.style.maxWidth).toBe("240px");
+  });
+});

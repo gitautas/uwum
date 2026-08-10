@@ -134,6 +134,8 @@ interface Actions {
   openCreateRoom(): void;
   closeCreateRoom(): void;
   updateSettings(patch: Partial<prefs.Settings>): void;
+  /** Move a reaction to the front of the recents row. */
+  noteReactionUsed(key: string): void;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
   setTimeline(key: string, items: TimelineItem[]): void;
@@ -320,6 +322,14 @@ export const useStore = create<State & Actions>((set, get) => ({
       prefs.save(settings);
       if (patch.accent) prefs.applyAccent(patch.accent);
       return { settings };
+    }),
+
+  noteReactionUsed: (key) =>
+    get().updateSettings({
+      recentReactions: [
+        key,
+        ...get().settings.recentReactions.filter((k) => k !== key),
+      ].slice(0, prefs.MAX_RECENT_REACTIONS),
     }),
 
   applyTimelineUpdate: ({ roomId: key, diffs }) =>

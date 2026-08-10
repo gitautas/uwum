@@ -73,16 +73,37 @@ const codeStyle: CSSProperties = {
   padding: "1px 5px",
 };
 
-function renderChildren(node: Node, depth: number): ReactNode[] {
+/**
+ * How tall an inline custom emote is drawn.
+ *
+ * MSC2545 emotes arrive as `<img data-mx-emoticon>` with whatever height the
+ * sending client felt like (FluffyChat says 32, Cinny leaves it off), so the
+ * attribute is ignored and they're drawn to match the text they sit in. A
+ * message that is *only* emotes gets the big treatment, the same as a message
+ * of nothing but Unicode emoji.
+ */
+const EMOTICON_SIZE = "1.45em";
+const EMOTICON_JUMBO = 48;
+
+function renderChildren(node: Node, depth: number, emoticon: string): ReactNode[] {
   return Array.from(node.childNodes).map((child, i) => (
-    <RenderNode key={i} node={child} depth={depth + 1} />
+    <RenderNode key={i} node={child} depth={depth + 1} emoticon={emoticon} />
   ));
 }
 
 /** Guards against a pathological or hostile nesting depth. */
 const MAX_DEPTH = 24;
 
-function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
+function RenderNode({
+  node,
+  depth,
+  emoticon,
+}: {
+  node: Node;
+  depth: number;
+  /** CSS height for custom emotes in this message. */
+  emoticon: string;
+}): ReactNode {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
   if (depth > MAX_DEPTH) return node.textContent;
@@ -91,7 +112,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
   const tag = el.tagName.toLowerCase();
 
   if (INLINE_STYLES[tag]) {
-    return <span style={INLINE_STYLES[tag]}>{renderChildren(el, depth)}</span>;
+    return <span style={INLINE_STYLES[tag]}>{renderChildren(el, depth, emoticon)}</span>;
   }
 
   if (HEADING_SIZES[tag]) {
@@ -104,7 +125,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
           margin: "6px 0 2px",
         }}
       >
-        {renderChildren(el, depth)}
+        {renderChildren(el, depth, emoticon)}
       </div>
     );
   }
@@ -114,14 +135,14 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
       return <br />;
 
     case "p":
-      return <div style={{ margin: "0 0 4px" }}>{renderChildren(el, depth)}</div>;
+      return <div style={{ margin: "0 0 4px" }}>{renderChildren(el, depth, emoticon)}</div>;
 
     case "code":
       // A <code> inside <pre> is styled by the <pre>; don't double up.
       if (el.parentElement?.tagName.toLowerCase() === "pre") {
-        return <>{renderChildren(el, depth)}</>;
+        return <>{renderChildren(el, depth, emoticon)}</>;
       }
-      return <code style={codeStyle}>{renderChildren(el, depth)}</code>;
+      return <code style={codeStyle}>{renderChildren(el, depth, emoticon)}</code>;
 
     case "pre":
       return (
@@ -141,7 +162,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
             whiteSpace: "pre",
           }}
         >
-          {renderChildren(el, depth)}
+          {renderChildren(el, depth, emoticon)}
         </div>
       );
 
@@ -155,7 +176,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
             color: "var(--text-secondary)",
           }}
         >
-          {renderChildren(el, depth)}
+          {renderChildren(el, depth, emoticon)}
         </div>
       );
 
@@ -168,7 +189,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
               <span style={{ color: "var(--text-tertiary)", flex: "none" }}>
                 {tag === "ol" ? `${i + 1}.` : "•"}
               </span>
-              <span>{renderChildren(li, depth)}</span>
+              <span>{renderChildren(li, depth, emoticon)}</span>
             </div>
           ))}
         </div>
@@ -176,23 +197,51 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
 
     case "a": {
       const href = safeHref(el.getAttribute("href"));
-      if (!href) return <>{renderChildren(el, depth)}</>;
+      if (!href) return <>{renderChildren(el, depth, emoticon)}</>;
       return (
         <a href={href} target="_blank" rel="noreferrer noopener">
-          {renderChildren(el, depth)}
+          {renderChildren(el, depth, emoticon)}
         </a>
       );
     }
 
     case "img": {
+      const emote = isEmoticon(el);
+      const alt = el.getAttribute("alt") ?? "";
+
       // Only inline images we fetch ourselves. A remote URL here would leak the
       // reader's IP to whoever sent the message.
-      const src = mediaUrl(el.getAttribute("src"), { width: 240, height: 180 });
-      if (!src) return <>{el.getAttribute("alt") ?? ""}</>;
+      const src = mediaUrl(
+        el.getAttribute("src"),
+        emote ? { width: 64, height: 64 } : { width: 240, height: 180 },
+      );
+      // A shortcode is the sender's own fallback text, so an emote we can't
+      // fetch still reads as `:blobcat:` rather than disappearing.
+      if (!src) return <>{alt}</>;
+
+      if (emote) {
+        return (
+          <img
+            src={src}
+            alt={alt}
+            title={alt}
+            style={{
+              height: emoticon,
+              // Emotes are rarely square; let the width follow the aspect ratio
+              // instead of squashing a wide one into a box.
+              width: "auto",
+              maxWidth: "8em",
+              verticalAlign: "-0.28em",
+              objectFit: "contain",
+            }}
+          />
+        );
+      }
+
       return (
         <img
           src={src}
-          alt={el.getAttribute("alt") ?? ""}
+          alt={alt}
           style={{ maxWidth: 240, maxHeight: 180, borderRadius: 10, verticalAlign: "middle" }}
         />
       );
@@ -210,7 +259,7 @@ function RenderNode({ node, depth }: { node: Node; depth: number }): ReactNode {
     // Anything else — including <script>, <style>, <iframe> and every unknown
     // tag — contributes its text and nothing more.
     default:
-      return <>{renderChildren(el, depth)}</>;
+      return <>{renderChildren(el, depth, emoticon)}</>;
   }
 }
 
@@ -226,5 +275,41 @@ export function renderFormattedBody(html: string): ReactNode | null {
   const doc = new DOMParser().parseFromString(trimmed, "text/html");
   if (!doc.body) return null;
 
-  return <>{renderChildren(doc.body, 0)}</>;
+  const emoticon = onlyEmoticons(doc.body) ? `${EMOTICON_JUMBO}px` : EMOTICON_SIZE;
+  return <>{renderChildren(doc.body, 0, emoticon)}</>;
+}
+
+/** MSC2545 marks custom emotes with a bare `data-mx-emoticon` attribute. */
+function isEmoticon(el: Element): boolean {
+  return el.hasAttribute("data-mx-emoticon");
+}
+
+/**
+ * True when the message is emotes and nothing else.
+ *
+ * The reply fallback doesn't count against it — a one-emote reply is still a
+ * one-emote message — and neither does whitespace between them.
+ */
+function onlyEmoticons(body: Element): boolean {
+  // The reply fallback is dropped at render time, so it has no business
+  // deciding how big the message itself is drawn.
+  const stripped = body.cloneNode(true) as Element;
+  stripped.querySelectorAll("mx-reply").forEach((el) => el.remove());
+
+  const images = [...stripped.querySelectorAll("img")];
+  if (images.length === 0 || !images.every(isEmoticon)) return false;
+
+  return textOutsideImages(stripped).trim() === "";
+}
+
+function textOutsideImages(node: Node): string {
+  let text = "";
+  for (const child of node.childNodes) {
+    if (child.nodeType === Node.TEXT_NODE) text += child.nodeValue ?? "";
+    else if (child.nodeType === Node.ELEMENT_NODE) {
+      if ((child as Element).tagName.toLowerCase() === "img") continue;
+      text += textOutsideImages(child);
+    }
+  }
+  return text;
 }
