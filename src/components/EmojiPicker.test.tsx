@@ -173,3 +173,21 @@ describe("EmojiPicker — custom packs", () => {
     expect(screen.getByRole("button", { name: "blobcat" })).toBeTruthy();
   });
 });
+
+describe("EmojiPicker — reactions from other clients", () => {
+  it("draws a remembered mxc reaction as its image, and sends it back unchanged", () => {
+    // Clicking someone else's custom-emoji reaction remembers their key, which
+    // is an address rather than a shortcode.
+    const key = "mxc://m.uwu.lt/E0BVMUGArK7dEk9";
+    useStore.getState().updateSettings({ recentReactions: [key] });
+
+    const onPick = vi.fn();
+    render(<EmojiPicker anchor={ANCHOR} packs={[PACK]} onPick={onPick} onClose={vi.fn()} />);
+
+    const cell = screen.getByRole("button", { name: key });
+    expect(cell.querySelector("img")).toBeTruthy();
+
+    fireEvent.click(cell);
+    expect(onPick).toHaveBeenCalledWith({ kind: "unicode", emoji: key });
+  });
+});

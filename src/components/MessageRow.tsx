@@ -11,7 +11,7 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
-import { emoteLookup, reactionShortcode } from "../lib/packs";
+import { emoteLookup, reactionImage } from "../lib/packs";
 import { renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
 import { useStore } from "../store";
@@ -464,9 +464,9 @@ export function MessageRow({
 /**
  * A reaction as it should be drawn.
  *
- * Custom emotes travel as `:shortcode:`, since that's all a reaction can be, so
- * a key we recognise is swapped for the image and anything else is left as the
- * text it is.
+ * A custom emote arrives either as `:shortcode:`, which needs the pack, or as
+ * the image's own `mxc://` address, which doesn't — see `reactionImage`. Both
+ * are drawn; anything else is the text it is.
  */
 function ReactionKey({
   label,
@@ -477,8 +477,7 @@ function ReactionKey({
   emotes: Map<string, PackImage>;
   size: number;
 }) {
-  const shortcode = reactionShortcode(label);
-  const image = shortcode ? emotes.get(shortcode) : undefined;
+  const image = reactionImage(label, emotes);
   const src = image ? mediaUrl(image.url, { width: size * 3, height: size * 3 }) : null;
 
   if (!image || !src) return <span>{label}</span>;
@@ -486,8 +485,8 @@ function ReactionKey({
   return (
     <img
       src={src}
-      alt={label}
-      title={label}
+      alt={image.label}
+      title={image.label}
       draggable={false}
       style={{ height: size, width: "auto", maxWidth: size * 3, objectFit: "contain" }}
     />

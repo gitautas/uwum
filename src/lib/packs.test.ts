@@ -4,6 +4,7 @@ import {
   emoteLookup,
   emoteRefs,
   matchEmotes,
+  reactionImage,
   reactionShortcode,
   stickersOf,
   typingShortcode,
@@ -93,6 +94,45 @@ describe("reactionShortcode", () => {
     expect(reactionShortcode("👍")).toBeNull();
     expect(reactionShortcode("nice :blobcat:")).toBeNull();
     expect(reactionShortcode("::")).toBeNull();
+  });
+});
+
+describe("reactionImage", () => {
+  const lookup = emoteLookup([pack("user", [image("blobcat")])]);
+
+  it("draws a shortcode we have the pack for", () => {
+    expect(reactionImage(":blobcat:", lookup)).toEqual({
+      url: "mxc://veil.gg/blobcat",
+      label: ":blobcat:",
+    });
+  });
+
+  it("leaves a shortcode we don't have as text", () => {
+    expect(reactionImage(":whoknows:", lookup)).toBeNull();
+  });
+
+  it("draws a bare mxc key, which is what some clients react with", () => {
+    // FluffyChat and friends put the image's own address in the reaction. No
+    // pack is needed to show it — the key *is* the picture.
+    expect(reactionImage("mxc://m.uwu.lt/E0BVMUGArK7dEk9", lookup)).toEqual({
+      url: "mxc://m.uwu.lt/E0BVMUGArK7dEk9",
+      label: "mxc://m.uwu.lt/E0BVMUGArK7dEk9",
+    });
+  });
+
+  it("names an mxc key from the pack when we happen to have that image", () => {
+    expect(reactionImage("mxc://veil.gg/blobcat", lookup)).toEqual({
+      url: "mxc://veil.gg/blobcat",
+      label: ":blobcat:",
+    });
+  });
+
+  it("leaves ordinary reactions alone", () => {
+    expect(reactionImage("👍", lookup)).toBeNull();
+    expect(reactionImage("nice one", lookup)).toBeNull();
+    // Not an address — a sentence that happens to mention one.
+    expect(reactionImage("see mxc://veil.gg/blobcat", lookup)).toBeNull();
+    expect(reactionImage("https://example.org/cat.png", lookup)).toBeNull();
   });
 });
 

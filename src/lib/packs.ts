@@ -51,13 +51,52 @@ export function stickersOf(packs: ImagePack[]): PackImage[] {
  * A reaction key that is exactly one shortcode, or null.
  *
  * Reactions are plain strings in Matrix, so reacting with a custom emote sends
- * `:blobcat:` and every other client shows those characters. We draw the image
- * when we know it and leave the text alone when we don't, which is the same
- * bargain the sender made.
+ * `:blobcat:` and every client without the pack shows those characters.
  */
 export function reactionShortcode(key: string): string | null {
   const match = /^:([^\s:]+):$/.exec(key.trim());
   return match ? match[1] : null;
+}
+
+/** A reaction that should be drawn as a picture rather than as text. */
+export interface ReactionImage {
+  url: string;
+  /** What to put in the tooltip and the alt text. */
+  label: string;
+}
+
+/**
+ * The image a reaction key stands for, if any.
+ *
+ * There are two ways a custom emote ends up in a reaction, because a reaction
+ * key is a bare string and the ecosystem never agreed on what to put in it:
+ *
+ * * `:blobcat:` — the shortcode, which needs the pack to mean anything, and
+ *   reads as those characters everywhere else. It's what we send.
+ * * `mxc://…` — the image's own address, which FluffyChat and others send.
+ *   Nothing has to be looked up: the key *is* the picture.
+ *
+ * Both are drawn as the image. An mxc key is named from the pack when we happen
+ * to have that image, since `:blobcat:` is a better tooltip than a media ID,
+ * and left as the URI when we don't — we can still show it, we just can't say
+ * what its owner calls it.
+ */
+export function reactionImage(
+  key: string,
+  lookup: Map<string, PackImage>,
+): ReactionImage | null {
+  const trimmed = key.trim();
+
+  const shortcode = reactionShortcode(trimmed);
+  if (shortcode) {
+    const image = lookup.get(shortcode);
+    return image ? { url: image.url, label: `:${shortcode}:` } : null;
+  }
+
+  if (!trimmed.startsWith("mxc://") || /\s/.test(trimmed)) return null;
+
+  const known = [...lookup.entries()].find(([, image]) => image.url === trimmed);
+  return { url: trimmed, label: known ? `:${known[0]}:` : trimmed };
 }
 
 /**

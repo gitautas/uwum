@@ -23,7 +23,13 @@ import {
   type SkinTone,
 } from "../lib/emoji";
 import { mediaUrl } from "../lib/ipc";
-import { emoteLookup, matchEmotes, stickersOf, type Picked } from "../lib/packs";
+import {
+  emoteLookup,
+  matchEmotes,
+  reactionImage,
+  stickersOf,
+  type Picked,
+} from "../lib/packs";
 import type { ImagePack, PackImage } from "../lib/types";
 import { useStore } from "../store";
 import { Icon } from "./ui";
@@ -150,11 +156,13 @@ export function EmojiPicker({
   }
 
   /**
-   * A remembered reaction, which is either a character or `:shortcode:`.
+   * A remembered reaction: a character, a `:shortcode:`, or the `mxc://` key
+   * some other client used for its own emote.
    *
-   * A shortcode whose pack has since gone away is sent as the text it is —
-   * that's what the person originally sent too, so it stays honest rather than
-   * silently doing nothing.
+   * Only a shortcode we still have a pack for becomes an emote pick; anything
+   * else is sent back as the exact string it was, which is what the person
+   * reacted with in the first place. That keeps a remembered reaction working
+   * even when we can't say what it is.
    */
   function pickRecent(key: string) {
     const code = /^:([^\s:]+):$/.exec(key)?.[1];
@@ -471,13 +479,25 @@ function ImageGrid({
 
 /** One pack image, or its shortcode if the media can't be addressed. */
 function PackImg({ image, size = CELL_IMAGE }: { image: PackImage; size?: number }) {
-  const src = mediaUrl(image.url, { width: size * 2, height: size * 2 });
-  if (!src) return <span style={{ fontSize: 9 }}>{image.shortcode}</span>;
+  return <RemoteImg url={image.url} label={image.shortcode} size={size} />;
+}
+
+function RemoteImg({
+  url,
+  label,
+  size = CELL_IMAGE,
+}: {
+  url: string;
+  label: string;
+  size?: number;
+}) {
+  const src = mediaUrl(url, { width: size * 2, height: size * 2 });
+  if (!src) return <span style={{ fontSize: 9 }}>{label}</span>;
 
   return (
     <img
       src={src}
-      alt={image.shortcode}
+      alt={label}
       loading="lazy"
       draggable={false}
       style={{ width: size, height: size, objectFit: "contain" }}
@@ -485,6 +505,13 @@ function PackImg({ image, size = CELL_IMAGE }: { image: PackImage; size?: number
   );
 }
 
+/**
+ * One remembered reaction.
+ *
+ * Drawn as a picture whenever it stands for one — including an `mxc://` key
+ * from a client that reacts that way, which has no shortcode to look up but is
+ * still perfectly showable.
+ */
 function RecentCell({
   value,
   lookup,
@@ -497,17 +524,20 @@ function RecentCell({
   onHover: (picked: Picked) => void;
 }) {
   const code = /^:([^\s:]+):$/.exec(value)?.[1];
-  const image = code ? lookup.get(code) : undefined;
+  const known = code ? lookup.get(code) : undefined;
+  const shown = reactionImage(value, lookup);
 
   return (
     <Cell
-      label={image ? image.shortcode : value}
+      // Named like the same emote in its pack below, so a search for it and a
+      // hover over it agree.
+      label={known ? known.shortcode : (shown?.label ?? value)}
       onClick={onClick}
       onHover={() =>
-        onHover(image ? { kind: "emote", image } : { kind: "unicode", emoji: value })
+        onHover(known ? { kind: "emote", image: known } : { kind: "unicode", emoji: value })
       }
     >
-      {image ? <PackImg image={image} /> : value}
+      {shown ? <RemoteImg url={shown.url} label={shown.label} /> : value}
     </Cell>
   );
 }
