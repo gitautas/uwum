@@ -670,14 +670,7 @@ pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<
     room.leave().await?;
 
     if forget {
-        // `forget` refuses outright while the room still looks joined, and
-        // `leave` only sends the request — the local state doesn't turn to Left
-        // until the sync carrying that leave comes back. Forgetting straight
-        // afterwards therefore fails, and then the leave lands and the room
-        // reappears in the list with "you left" as its last event, which is
-        // exactly what it looks like from the outside: a room that won't go
-        // away until you forget it twice.
-        if !wait_until_left(&room).await {
+        if !wait_until_sync_lets_go(core, room_id).await {
             return Err(Error::Other(
                 "left it, but your server hasn't caught up yet, so it isn't \
                  forgotten. try again in a moment~"
@@ -690,17 +683,42 @@ pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<
     Ok(())
 }
 
-/// Wait for a leave to come back round through sync. `false` on timeout.
-async fn wait_until_left(room: &Room) -> bool {
+/// Wait until the sync side has finished with a room we've just left.
+///
+/// The obvious check — "is the room Left yet?" — is worthless here. `leave`
+/// marks the room Left locally the instant the request succeeds, without
+/// waiting for sync, so that question answers yes immediately and says nothing
+/// about whether anything else is still working on the room.
+///
+/// It matters because forgetting *deletes the room's event-cache rows*. Do it
+/// while the SDK is still writing sync-delivered events into them and the
+/// writes fail with `FOREIGN KEY constraint failed`, which is the error that
+/// has been showing up in the log — and a removal that half-happens leaves
+/// enough behind for the room to come back on the next start, needing to be
+/// forgotten all over again.
+///
+/// The room dropping out of the room list is the signal that the sync side has
+/// let go of it: that list is driven by sliding sync, so the room leaving it
+/// means the leave has been through a real sync round rather than only through
+/// our own optimism. The settle afterwards is a mitigation rather than a proof
+/// — the ordering inside the SDK isn't ours to control — but it turns a
+/// reliable collision into an unlikely one.
+async fn wait_until_sync_lets_go(core: &MatrixCore, room_id: &RoomId) -> bool {
     use tokio::time::{Duration, Instant, sleep};
 
+    let id = room_id.to_string();
     let deadline = Instant::now() + Duration::from_secs(10);
+
     while Instant::now() < deadline {
-        if matches!(room.state(), RoomState::Left | RoomState::Banned) {
+        let still_listed =
+            core.rooms.lock().await.rooms.iter().any(|room| room.id == id);
+        if !still_listed {
+            sleep(Duration::from_millis(750)).await;
             return true;
         }
         sleep(Duration::from_millis(150)).await;
     }
+
     false
 }
 
