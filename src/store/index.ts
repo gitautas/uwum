@@ -133,6 +133,8 @@ interface Actions {
   markLeaving(roomId: string): void;
   /** Put it back — the leave failed, or we've joined it again. */
   unmarkLeaving(roomId: string): void;
+  /** Remember a forgotten room, so the cache can't bring it back. */
+  markForgotten(roomId: string): void;
   /** Re-read the spaces now rather than waiting for the slow poll. */
   refreshSpaces(): Promise<void>;
   setActiveSpace(id: string | null): void;
@@ -245,7 +247,28 @@ export const useStore = create<State & Actions>((set, get) => ({
     ),
 
   unmarkLeaving: (roomId) =>
-    set((s) => ({ leavingRooms: s.leavingRooms.filter((id) => id !== roomId) })),
+    set((s) => {
+      // Joining again is the one thing that undoes a forget.
+      const forgottenRooms = s.settings.forgottenRooms.filter((id) => id !== roomId);
+      const settings = { ...s.settings, forgottenRooms };
+      if (forgottenRooms.length !== s.settings.forgottenRooms.length) prefs.save(settings);
+
+      return {
+        leavingRooms: s.leavingRooms.filter((id) => id !== roomId),
+        settings,
+      };
+    }),
+
+  markForgotten: (roomId) =>
+    set((s) => {
+      if (s.settings.forgottenRooms.includes(roomId)) return {};
+      const settings = {
+        ...s.settings,
+        forgottenRooms: [...s.settings.forgottenRooms, roomId],
+      };
+      prefs.save(settings);
+      return { settings };
+    }),
 
   resyncRooms: async () => {
     try {
@@ -465,7 +488,11 @@ export function filterRooms(
     search,
     spaces,
     leavingRooms,
-  }: Pick<State, "activeSpaceId" | "filter" | "search" | "spaces" | "leavingRooms">,
+    settings,
+  }: Pick<
+    State,
+    "activeSpaceId" | "filter" | "search" | "spaces" | "leavingRooms" | "settings"
+  >,
 ): RoomSummary[] {
   const needle = search.trim().toLowerCase();
 
@@ -482,6 +509,11 @@ export function filterRooms(
     if (room.membership === "left" || room.membership === "banned") return false;
     // Still joined as far as the server is concerned, but on its way out.
     if (leavingRooms.includes(room.id)) return false;
+    // Forgotten, and resurrected by the local cache. An invite is the one
+    // thing that brings it back: someone asking us in again is not a ghost.
+    if (settings.forgottenRooms.includes(room.id) && room.membership !== "invited") {
+      return false;
+    }
 
     if (activeSpaceId) {
       const inSpace =

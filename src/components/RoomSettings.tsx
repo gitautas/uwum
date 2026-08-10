@@ -135,6 +135,7 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
   const selectRoom = useStore((s) => s.selectRoom);
   const markLeaving = useStore((s) => s.markLeaving);
   const unmarkLeaving = useStore((s) => s.unmarkLeaving);
+  const markForgotten = useStore((s) => s.markForgotten);
   const [confirming, setConfirming] = useState(false);
   const [forget, setForget] = useState(false);
 
@@ -159,6 +160,9 @@ function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) 
 
     try {
       await ipc.leaveRoom(room.id, forget);
+      // The local cache will bring a forgotten room back on the next launch —
+      // the server won't. Remember which is which.
+      if (forget) markForgotten(room.id);
     } catch (e) {
       // Still in it after all — put it back where it was.
       unmarkLeaving(room.id);
