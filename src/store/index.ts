@@ -12,6 +12,7 @@ import { applyDiffs } from "../lib/diff";
 import * as ipc from "../lib/ipc";
 import * as prefs from "../lib/settings";
 import type {
+  ImagePack,
   RoomsSnapshot,
   RoomsUpdate,
   RoomSummary,
@@ -94,6 +95,14 @@ interface State {
   lightbox: { mxc: string; name: string } | null;
   showCreateRoom: boolean;
 
+  /**
+   * Custom emote and sticker packs usable in the room that's open.
+   *
+   * Loaded per room rather than once, because a room's own packs count there
+   * whether or not they've been enabled everywhere.
+   */
+  packs: ImagePack[];
+
   /** Machine-local preferences, persisted outside the account. */
   settings: prefs.Settings;
 
@@ -136,6 +145,8 @@ interface Actions {
   updateSettings(patch: Partial<prefs.Settings>): void;
   /** Move a reaction to the front of the recents row. */
   noteReactionUsed(key: string): void;
+  /** Re-read the packs available in a room. */
+  loadPacks(roomId: string | null): Promise<void>;
 
   applyTimelineUpdate(update: TimelineUpdate): void;
   setTimeline(key: string, items: TimelineItem[]): void;
@@ -177,6 +188,7 @@ const initial: State = {
   profileCard: null,
   lightbox: null,
   showCreateRoom: false,
+  packs: [],
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
@@ -256,8 +268,12 @@ export const useStore = create<State & Actions>((set, get) => ({
       void ipc.closeTimeline(previous).catch(() => {});
     }
 
-    set({ activeRoomId: roomId, activeThreadRoot: null });
+    set({ activeRoomId: roomId, activeThreadRoot: null, packs: [] });
     if (!roomId) return;
+
+    // Packs are wanted before the picker opens, not when it does — opening it
+    // should never be the thing that waits on a round trip.
+    void get().loadPacks(roomId);
 
     try {
       const items = await ipc.openTimeline(roomId);
@@ -323,6 +339,16 @@ export const useStore = create<State & Actions>((set, get) => ({
       if (patch.accent) prefs.applyAccent(patch.accent);
       return { settings };
     }),
+
+  loadPacks: async (roomId) => {
+    try {
+      set({ packs: await ipc.getImagePacks(roomId ?? undefined) });
+    } catch {
+      // A picker with no custom packs is still a picker; nothing here is worth
+      // interrupting the user over.
+      set({ packs: [] });
+    }
+  },
 
   noteReactionUsed: (key) =>
     get().updateSettings({

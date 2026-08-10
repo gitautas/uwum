@@ -9,10 +9,10 @@ use tauri::{AppHandle, Manager, State};
 use crate::{
     dto::{
         HomeserverInfo, RoomMemberDto, RoomsSnapshot, SendOptions, SessionInfo, SpaceSummary,
-        TimelineItemDto,
+        StickerOptions, TimelineItemDto,
     },
     error::{Error, Result},
-    matrix::{auth, core::AppState, media, profile, rooms, timeline},
+    matrix::{auth, core::AppState, media, packs, profile, rooms, timeline},
     rtc, verification,
 };
 
@@ -203,6 +203,23 @@ pub async fn set_room_marked_unread(
 }
 
 // ---------------------------------------------------------------------------
+// image packs
+// ---------------------------------------------------------------------------
+
+/// Every custom emote and sticker pack usable right now.
+///
+/// `room_id` is the room being looked at, whose own packs are available whether
+/// or not they've been enabled globally.
+#[tauri::command]
+pub async fn get_image_packs(
+    state: State<'_, AppState>,
+    room_id: Option<String>,
+) -> Result<Vec<packs::ImagePackDto>> {
+    let room_id = room_id.as_deref().map(parse_room_id).transpose()?;
+    packs::available(&*state.core().await?, room_id.as_deref()).await
+}
+
+// ---------------------------------------------------------------------------
 // timeline
 // ---------------------------------------------------------------------------
 
@@ -233,6 +250,22 @@ pub async fn send_message(
     options: SendOptions,
 ) -> Result<()> {
     timeline::send(&*state.core().await?, &parse_room_id(&room_id)?, options).await
+}
+
+#[tauri::command]
+pub async fn send_sticker(
+    state: State<'_, AppState>,
+    room_id: String,
+    thread_root: Option<String>,
+    sticker: StickerOptions,
+) -> Result<()> {
+    timeline::send_sticker(
+        &*state.core().await?,
+        &parse_room_id(&room_id)?,
+        thread_root.as_deref(),
+        sticker,
+    )
+    .await
 }
 
 #[tauri::command]

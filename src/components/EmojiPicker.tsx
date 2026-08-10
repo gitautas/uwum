@@ -1,9 +1,14 @@
 /**
- * The emoji picker — search, categories, skin tone, and a preview line.
+ * The emoji picker — custom packs, the Unicode set, search and skin tone.
  *
  * Rendered into a fixed-position layer and placed against an anchor rectangle,
  * so it can be opened from a message hover bar near the bottom of the timeline
  * without being clipped by whatever scrolls above it.
+ *
+ * Everything on offer is flattened into one list of sections: your packs first,
+ * then the room's, then stickers if the caller can send them, then Unicode by
+ * category. The rail across the top jumps between them and search runs over all
+ * of them at once, so a shortcode and an emoji name are found the same way.
  */
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -17,6 +22,9 @@ import {
   type Emoji,
   type SkinTone,
 } from "../lib/emoji";
+import { mediaUrl } from "../lib/ipc";
+import { emoteLookup, matchEmotes, stickersOf, type Picked } from "../lib/packs";
+import type { ImagePack, PackImage } from "../lib/types";
 import { useStore } from "../store";
 import { Icon } from "./ui";
 
@@ -24,19 +32,37 @@ const WIDTH = 340;
 const HEIGHT = 392;
 /** Kept clear of the window edges so the picker never sits flush against them. */
 const MARGIN = 10;
+/** The size custom images are fetched and drawn at in the grid. */
+const CELL_IMAGE = 26;
+
+/** One scrollable block of the picker, and one button on the rail. */
+type Section =
+  | { key: string; title: string; icon: string; emojis: Emoji[] }
+  | { key: string; title: string; icon: string; images: PackImage[]; sticker: boolean };
 
 export function EmojiPicker({
   anchor,
+  packs = [],
+  stickers = false,
   onPick,
   onClose,
 }: {
   /** Screen rect the picker should sit next to — usually the button that opened it. */
   anchor: DOMRect;
-  onPick: (emoji: string) => void;
+  /** Custom packs to offer above the Unicode set. */
+  packs?: ImagePack[];
+  /**
+   * Whether stickers are offerable here.
+   *
+   * A reaction is a string, so a sticker can't be one: the hover bar asks for
+   * emotes only, and the composer asks for everything.
+   */
+  stickers?: boolean;
+  onPick: (picked: Picked) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
-  const [hovered, setHovered] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<Picked | null>(null);
   const skinTone = useStore((s) => s.settings.skinTone);
   const recent = useStore((s) => s.settings.recentReactions);
   const updateSettings = useStore((s) => s.updateSettings);
@@ -49,7 +75,7 @@ export function EmojiPicker({
     search.current?.focus();
   }, []);
 
-  // Escape closes, and so does a click anywhere else. Pointerdown rather than
+  // Escape closes, and so does a press anywhere else. Pointerdown rather than
   // click so a press that starts outside can't also land on something inside.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -70,20 +96,76 @@ export function EmojiPicker({
     };
   }, [onClose]);
 
-  const results = useMemo(() => searchEmoji(query), [query]);
-  const searching = query.trim().length > 0;
+  const lookup = useMemo(() => emoteLookup(packs), [packs]);
+
+  const sections = useMemo<Section[]>(() => {
+    const out: Section[] = [];
+
+    for (const pack of packs) {
+      const images = pack.images.filter((i) => i.isEmoticon);
+      if (images.length > 0) {
+        out.push({
+          key: pack.id,
+          title: pack.displayName,
+          icon: pack.source === "user" ? "user-circle" : "users-three",
+          images,
+          sticker: false,
+        });
+      }
+    }
+
+    if (stickers) {
+      const all = stickersOf(packs);
+      if (all.length > 0) {
+        out.push({ key: "stickers", title: "stickers", icon: "sticker", images: all, sticker: true });
+      }
+    }
+
+    for (const group of EMOJI_GROUPS) {
+      out.push({ key: group.name, title: group.name, icon: group.icon, emojis: group.emojis });
+    }
+
+    return out;
+  }, [packs, stickers]);
+
+  const results = useMemo(() => {
+    if (query.trim().length === 0) return null;
+    return {
+      emotes: matchEmotes(lookup, query.trim(), 16),
+      emojis: searchEmoji(query),
+    };
+  }, [query, lookup]);
 
   const position = usePlacement(anchor);
 
-  function pick(emoji: Emoji | string) {
-    const raw = typeof emoji === "string" ? emoji : emoji.emoji;
-    const toneable = typeof emoji === "string" ? false : emoji.skinToneSupport;
-    onPick(toneable ? withSkinTone(raw, skinTone) : raw);
+  function pickEmoji(emoji: Emoji) {
+    onPick({
+      kind: "unicode",
+      emoji: emoji.skinToneSupport ? withSkinTone(emoji.emoji, skinTone) : emoji.emoji,
+    });
+  }
+
+  function pickImage(image: PackImage, sticker: boolean) {
+    onPick({ kind: sticker ? "sticker" : "emote", image });
+  }
+
+  /**
+   * A remembered reaction, which is either a character or `:shortcode:`.
+   *
+   * A shortcode whose pack has since gone away is sent as the text it is —
+   * that's what the person originally sent too, so it stays honest rather than
+   * silently doing nothing.
+   */
+  function pickRecent(key: string) {
+    const code = /^:([^\s:]+):$/.exec(key)?.[1];
+    const image = code ? lookup.get(code) : undefined;
+    onPick(image ? { kind: "emote", image } : { kind: "unicode", emoji: key });
   }
 
   function jumpTo(index: number) {
-    const target = scroller.current?.querySelector(`[data-group="${index}"]`);
-    target?.scrollIntoView({ block: "start" });
+    scroller.current
+      ?.querySelector(`[data-group="${index}"]`)
+      ?.scrollIntoView({ block: "start" });
   }
 
   return (
@@ -138,8 +220,9 @@ export function EmojiPicker({
         </div>
       </div>
 
-      {!searching && (
+      {!results && (
         <div
+          className="uwu-scroll"
           style={{
             display: "flex",
             gap: 2,
@@ -147,14 +230,15 @@ export function EmojiPicker({
             borderBottom: "1px solid var(--border-subtle)",
           }}
         >
-          {EMOJI_GROUPS.map((group, i) => (
+          {sections.map((section, i) => (
             <button
-              key={group.name}
+              key={section.key}
               onClick={() => jumpTo(i)}
-              title={group.name}
-              aria-label={group.name}
+              title={section.title}
+              aria-label={section.title}
               style={{
                 flex: 1,
+                minWidth: 22,
                 height: 26,
                 borderRadius: 8,
                 display: "flex",
@@ -169,112 +253,77 @@ export function EmojiPicker({
                 e.currentTarget.style.background = "transparent";
               }}
             >
-              <Icon name={group.icon} size={14} color="var(--text-tertiary)" />
+              <Icon name={section.icon} size={14} color="var(--text-tertiary)" />
             </button>
           ))}
         </div>
       )}
 
       <div ref={scroller} className="uwu-scroll" style={{ flex: 1, padding: "4px 8px 8px" }}>
-        {searching ? (
-          results.length > 0 ? (
-            <Section title={`${results.length} match${results.length === 1 ? "" : "es"}`}>
-              <Grid emojis={results} tone={skinTone} onPick={pick} onHover={setHovered} />
-            </Section>
-          ) : (
-            <div
-              style={{
-                padding: "28px 12px",
-                textAlign: "center",
-                fontSize: 12.5,
-                color: "var(--text-tertiary)",
-              }}
-            >
-              nothing matches "{query.trim()}"
-            </div>
-          )
+        {results ? (
+          <SearchResults
+            results={results}
+            query={query.trim()}
+            tone={skinTone}
+            onPickEmoji={pickEmoji}
+            onPickImage={(image) => pickImage(image, false)}
+            onHover={setHovered}
+          />
         ) : (
           <>
             {recent.length > 0 && (
-              <Section title="recent">
-                {/* Recents are stored with their tone already applied — they're
-                    what was actually sent, not a base to re-tone. */}
+              <Block title="recent">
+                {/* Recents are stored exactly as they were sent — already
+                    toned, and already a shortcode where one was used. */}
                 <div style={GRID}>
                   {recent.map((key) => (
-                    <Cell
+                    <RecentCell
                       key={key}
-                      label={key}
-                      onClick={() => pick(key)}
-                      onHover={() => setHovered(key)}
-                    >
-                      {key}
-                    </Cell>
+                      value={key}
+                      lookup={lookup}
+                      onClick={() => pickRecent(key)}
+                      onHover={setHovered}
+                    />
                   ))}
                 </div>
-              </Section>
+              </Block>
             )}
 
-            {EMOJI_GROUPS.map((group, i) => (
-              <Section key={group.name} title={group.name} index={i}>
-                <Grid
-                  emojis={group.emojis}
-                  tone={skinTone}
-                  onPick={pick}
-                  onHover={setHovered}
-                />
-              </Section>
+            {sections.map((section, i) => (
+              <Block key={section.key} title={section.title} index={i}>
+                {"emojis" in section ? (
+                  <EmojiGrid
+                    emojis={section.emojis}
+                    tone={skinTone}
+                    onPick={pickEmoji}
+                    onHover={setHovered}
+                  />
+                ) : (
+                  <ImageGrid
+                    images={section.images}
+                    sticker={section.sticker}
+                    onPick={(image) => pickImage(image, section.sticker)}
+                    onHover={setHovered}
+                  />
+                )}
+              </Block>
             ))}
           </>
         )}
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          padding: "7px 12px",
-          borderTop: "1px solid var(--border-subtle)",
-          background: "var(--surface-card)",
-        }}
-      >
-        <span style={{ fontSize: 17, lineHeight: 1 }}>{hovered ?? "🫧"}</span>
-        <span
-          className="uwu-ellipsis"
-          style={{ flex: 1, fontSize: 11.5, color: "var(--text-secondary)" }}
-        >
-          {hovered ? (emojiName(hovered) ?? hovered) : "pick something~"}
-        </span>
-
-        <div style={{ display: "flex", gap: 1 }}>
-          {TONE_SAMPLES.map((sample, tone) => (
-            <button
-              key={tone}
-              onClick={() => updateSettings({ skinTone: tone as SkinTone })}
-              title={tone === 0 ? "default skin tone" : `skin tone ${tone}`}
-              // The swatch is a hand, so without a label the button announces
-              // itself as "waving hand" rather than as the tone it sets.
-              aria-label={tone === 0 ? "default skin tone" : `skin tone ${tone}`}
-              aria-pressed={skinTone === tone}
-              style={{
-                width: 20,
-                height: 20,
-                borderRadius: 6,
-                fontSize: 12,
-                lineHeight: 1,
-                cursor: "pointer",
-                background:
-                  skinTone === tone ? "color-mix(in srgb, var(--accent-primary) 22%, transparent)" : "transparent",
-              }}
-            >
-              {sample}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Footer
+        hovered={hovered}
+        skinTone={skinTone}
+        onTone={(tone) => updateSettings({ skinTone: tone })}
+      />
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// pieces
+// ---------------------------------------------------------------------------
 
 const GRID: React.CSSProperties = {
   display: "grid",
@@ -282,7 +331,55 @@ const GRID: React.CSSProperties = {
   gap: 1,
 };
 
-function Section({
+function SearchResults({
+  results,
+  query,
+  tone,
+  onPickEmoji,
+  onPickImage,
+  onHover,
+}: {
+  results: { emotes: PackImage[]; emojis: Emoji[] };
+  query: string;
+  tone: SkinTone;
+  onPickEmoji: (emoji: Emoji) => void;
+  onPickImage: (image: PackImage) => void;
+  onHover: (picked: Picked) => void;
+}) {
+  const { emotes, emojis } = results;
+
+  if (emotes.length === 0 && emojis.length === 0) {
+    return (
+      <div
+        style={{
+          padding: "28px 12px",
+          textAlign: "center",
+          fontSize: 12.5,
+          color: "var(--text-tertiary)",
+        }}
+      >
+        nothing matches "{query}"
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {emotes.length > 0 && (
+        <Block title="your packs">
+          <ImageGrid images={emotes} sticker={false} onPick={onPickImage} onHover={onHover} />
+        </Block>
+      )}
+      {emojis.length > 0 && (
+        <Block title={`${emojis.length} emoji`}>
+          <EmojiGrid emojis={emojis} tone={tone} onPick={onPickEmoji} onHover={onHover} />
+        </Block>
+      )}
+    </>
+  );
+}
+
+function Block({
   title,
   index,
   children,
@@ -295,6 +392,7 @@ function Section({
   return (
     <div data-group={index}>
       <div
+        className="uwu-ellipsis"
         style={{
           position: "sticky",
           top: 0,
@@ -315,7 +413,7 @@ function Section({
   );
 }
 
-function Grid({
+function EmojiGrid({
   emojis,
   tone,
   onPick,
@@ -324,26 +422,93 @@ function Grid({
   emojis: Emoji[];
   tone: SkinTone;
   onPick: (emoji: Emoji) => void;
-  onHover: (emoji: string) => void;
+  onHover: (picked: Picked) => void;
 }) {
   return (
     <div style={GRID}>
-      {emojis.map((emoji) => {
-        const shown = emoji.skinToneSupport ? withSkinTone(emoji.emoji, tone) : emoji.emoji;
-        return (
-          <Cell
-            key={emoji.emoji}
-            label={emoji.name}
-            onClick={() => onPick(emoji)}
-            // The preview names the base emoji, so hovering a toned hand still
-            // says "waving hand" rather than falling back to the character.
-            onHover={() => onHover(emoji.emoji)}
-          >
-            {shown}
-          </Cell>
-        );
-      })}
+      {emojis.map((emoji) => (
+        <Cell
+          key={emoji.emoji}
+          label={emoji.name}
+          onClick={() => onPick(emoji)}
+          // The preview names the base emoji, so hovering a toned hand still
+          // says "waving hand" rather than falling back to the character.
+          onHover={() => onHover({ kind: "unicode", emoji: emoji.emoji })}
+        >
+          {emoji.skinToneSupport ? withSkinTone(emoji.emoji, tone) : emoji.emoji}
+        </Cell>
+      ))}
     </div>
+  );
+}
+
+function ImageGrid({
+  images,
+  sticker,
+  onPick,
+  onHover,
+}: {
+  images: PackImage[];
+  sticker: boolean;
+  onPick: (image: PackImage) => void;
+  onHover: (picked: Picked) => void;
+}) {
+  return (
+    <div style={GRID}>
+      {images.map((image) => (
+        <Cell
+          key={`${image.shortcode}-${image.url}`}
+          label={image.shortcode}
+          onClick={() => onPick(image)}
+          onHover={() => onHover({ kind: sticker ? "sticker" : "emote", image })}
+        >
+          <PackImg image={image} />
+        </Cell>
+      ))}
+    </div>
+  );
+}
+
+/** One pack image, or its shortcode if the media can't be addressed. */
+function PackImg({ image, size = CELL_IMAGE }: { image: PackImage; size?: number }) {
+  const src = mediaUrl(image.url, { width: size * 2, height: size * 2 });
+  if (!src) return <span style={{ fontSize: 9 }}>{image.shortcode}</span>;
+
+  return (
+    <img
+      src={src}
+      alt={image.shortcode}
+      loading="lazy"
+      draggable={false}
+      style={{ width: size, height: size, objectFit: "contain" }}
+    />
+  );
+}
+
+function RecentCell({
+  value,
+  lookup,
+  onClick,
+  onHover,
+}: {
+  value: string;
+  lookup: Map<string, PackImage>;
+  onClick: () => void;
+  onHover: (picked: Picked) => void;
+}) {
+  const code = /^:([^\s:]+):$/.exec(value)?.[1];
+  const image = code ? lookup.get(code) : undefined;
+
+  return (
+    <Cell
+      label={image ? image.shortcode : value}
+      onClick={onClick}
+      onHover={() =>
+        onHover(image ? { kind: "emote", image } : { kind: "unicode", emoji: value })
+      }
+    >
+      {image ? <PackImg image={image} /> : value}
+    </Cell>
   );
 }
 
@@ -379,12 +544,101 @@ function Cell({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
+        // An image that fails to load falls back to its alt text, which is
+        // wider than the cell; clip it rather than letting it push the grid out.
+        overflow: "hidden",
       }}
     >
       {children}
     </button>
   );
 }
+
+function Footer({
+  hovered,
+  skinTone,
+  onTone,
+}: {
+  hovered: Picked | null;
+  skinTone: SkinTone;
+  onTone: (tone: SkinTone) => void;
+}) {
+  const label =
+    hovered === null
+      ? "pick something~"
+      : hovered.kind === "unicode"
+        ? (emojiName(hovered.emoji) ?? hovered.emoji)
+        : `:${hovered.image.shortcode}:`;
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "7px 12px",
+        borderTop: "1px solid var(--border-subtle)",
+        background: "var(--surface-card)",
+      }}
+    >
+      <span
+        style={{
+          width: 20,
+          fontSize: 17,
+          lineHeight: 1,
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        {hovered === null ? (
+          "🫧"
+        ) : hovered.kind === "unicode" ? (
+          hovered.emoji
+        ) : (
+          <PackImg image={hovered.image} size={19} />
+        )}
+      </span>
+      <span
+        className="uwu-ellipsis"
+        style={{ flex: 1, fontSize: 11.5, color: "var(--text-secondary)" }}
+      >
+        {label}
+      </span>
+
+      <div style={{ display: "flex", gap: 1 }}>
+        {TONE_SAMPLES.map((sample, tone) => (
+          <button
+            key={tone}
+            onClick={() => onTone(tone as SkinTone)}
+            title={tone === 0 ? "default skin tone" : `skin tone ${tone}`}
+            // The swatch is a hand, so without a label the button announces
+            // itself as "waving hand" rather than as the tone it sets.
+            aria-label={tone === 0 ? "default skin tone" : `skin tone ${tone}`}
+            aria-pressed={skinTone === tone}
+            style={{
+              width: 20,
+              height: 20,
+              borderRadius: 6,
+              fontSize: 12,
+              lineHeight: 1,
+              cursor: "pointer",
+              background:
+                skinTone === tone
+                  ? "color-mix(in srgb, var(--accent-primary) 22%, transparent)"
+                  : "transparent",
+            }}
+          >
+            {sample}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// placement
+// ---------------------------------------------------------------------------
 
 /**
  * Place the picker beside its anchor, flipping and sliding to stay on screen.

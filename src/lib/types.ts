@@ -403,4 +403,59 @@ export interface SendOptions {
   replyTo?: string | null;
   threadRoot?: string | null;
   msgtype?: string | null;
+  /**
+   * Custom emotes the body might mention as `:shortcode:`.
+   *
+   * The whole set is handed over rather than only what's in the text; the
+   * backend matches against the rendered HTML so Markdown and emotes both
+   * survive in one message.
+   */
+  emotes?: { shortcode: string; url: string }[];
+}
+
+// ---------------------------------------------------------------------------
+// image packs (MSC2545)
+// ---------------------------------------------------------------------------
+
+export interface PackImage {
+  /** The `:name:` a person types, without the colons. */
+  shortcode: string;
+  url: string;
+  body: string;
+  isEmoticon: boolean;
+  isSticker: boolean;
+  width: number | null;
+  height: number | null;
+  size: number | null;
+  mimetype: string | null;
+}
+
+export interface ImagePack {
+  /** `user`, or `<roomId>|<stateKey>` for a room's pack. */
+  id: string;
+  source: "user" | "room";
+  roomId: string | null;
+  stateKey: string | null;
+  displayName: string;
+  avatarUrl: string | null;
+  attribution: string | null;
+  images: PackImage[];
+  /**
+   * Carried outside the room it belongs to. Always true for your own pack.
+   *
+   * Not a filter — every pack handed back is usable where it was asked for,
+   * including a room's own packs in that room.
+   */
+  everywhere: boolean;
+  canEdit: boolean;
+}
+
+/** One image from a pack, on its way out as an `m.sticker`. */
+export interface StickerOptions {
+  body: string;
+  url: string;
+  width?: number | null;
+  height?: number | null;
+  size?: number | null;
+  mimetype?: string | null;
 }
