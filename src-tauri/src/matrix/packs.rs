@@ -1,24 +1,28 @@
-//! Custom emotes and stickers — MSC2545 image packs.
+//! Custom emotes and stickers — image packs.
 //!
 //! An image pack is a set of named images. The name is a shortcode (`blobcat`),
 //! written `:blobcat:` where a person types it, and each image says whether it's
 //! usable as an inline emote, as a sticker, or both.
 //!
-//! Packs live in two places, and the difference is who they belong to:
+//! A pack lives in a room, as an `m.room.image_pack` state event; a room may
+//! hold any number of them, one per state key. `m.image_pack.rooms` in account
+//! data is the list of packs you've chosen to carry with you everywhere rather
+//! than using only in the room they came from. Between them that's the whole
+//! model — there is no such thing as a pack that isn't in a room, which is why
+//! [`create_personal_pack`] makes a room nobody else is in.
 //!
-//! * `im.ponies.user_emotes` in account data — yours, on every device you sign
-//!   in from, visible to nobody else.
-//! * `im.ponies.room_emotes` as room state — the room's, shared with everyone
-//!   in it. A room can hold several, one per state key.
-//!
-//! A third event, `im.ponies.emote_rooms` in account data, is the list of room
-//! packs you've chosen to carry with you everywhere rather than only using in
-//! the room they came from.
+//! Both events are also read and written under the names MSC2545 used before
+//! Matrix 1.19 stabilised them (`im.ponies.room_emotes`, `im.ponies.emote_rooms`),
+//! because that's what FluffyChat and Cinny still speak. The one thing with no
+//! stable equivalent is `im.ponies.user_emotes`, the MSC's single personal pack
+//! in account data: it's read so that a pack made in another client shows up
+//! here, and written when it's edited, but nothing new is put in it.
 //!
 //! Everything is parsed leniently. These events are written by other clients
 //! and edited by hand, so a pack with one malformed image should lose that
 //! image, not the pack — and a malformed pack should lose the pack, not the
-//! user's whole emote set.
+//! user's whole emote set. Fields we don't recognise are carried through an
+//! edit rather than dropped.
 
 use std::collections::BTreeMap;
 
@@ -33,21 +37,41 @@ use crate::{
     matrix::MatrixCore,
 };
 
+/// The personal pack. Only MSC2545 has one — the spec dropped it, on the
+/// grounds that a pack of your own is a pack in a room only you are in.
 pub const USER_EMOTES: &str = "im.ponies.user_emotes";
-pub const ROOM_EMOTES: &str = "im.ponies.room_emotes";
-pub const EMOTE_ROOMS: &str = "im.ponies.emote_rooms";
+
+/// A room's packs, and the list of the ones you carry everywhere.
+///
+/// Each exists twice: the name Matrix 1.19 settled on, and the name MSC2545
+/// used while it was a proposal. FluffyChat and Cinny are still on the second,
+/// so both are read, and both are written — a pack edited here has to stay
+/// visible to the people you share rooms with. The legacy half comes out once
+/// the clients we care about have moved.
+pub const ROOM_PACK: &str = "m.room.image_pack";
+pub const ROOM_PACK_LEGACY: &str = "im.ponies.room_emotes";
+pub const PACK_ROOMS: &str = "m.image_pack.rooms";
+pub const PACK_ROOMS_LEGACY: &str = "im.ponies.emote_rooms";
 
 // ---------------------------------------------------------------------------
 // the wire format
 // ---------------------------------------------------------------------------
 
-/// An `im.ponies.*` pack event, as it appears on the wire.
+/// A pack event's content, as it appears on the wire.
+///
+/// Every one of these carries an `extra` catch-all, because editing a pack is
+/// read-modify-write: without it, changing one shortcode in a pack made by
+/// another client would quietly delete every field that client knew about and
+/// we didn't. The spec asks for exactly this on `m.image_pack.rooms`, and it's
+/// the right thing to do for all of them.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct ImagePackContent {
     #[serde(default)]
     pub images: BTreeMap<String, PackImage>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pack: Option<PackInfo>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -60,6 +84,8 @@ pub struct PackInfo {
     pub usage: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attribution: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -69,8 +95,16 @@ pub struct PackImage {
     pub body: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub info: Option<ImageInfo>,
+    /// Per-image usage, which MSC2545 has and the spec doesn't.
+    ///
+    /// Still written: our own reader and every `im.ponies.*` client honour it,
+    /// and a client reading the spec's shape treats it as an unknown field and
+    /// falls back to the pack's usage — which [`derive_pack_usage`] keeps in
+    /// step, so nothing lands in the wrong picker.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -83,13 +117,20 @@ pub struct ImageInfo {
     pub size: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mimetype: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
-/// `im.ponies.emote_rooms`: room ID → state key → (an empty object, for now).
+/// Room ID → state key → an object the spec reserves for future use.
+///
+/// That innermost object is opaque and must survive being edited, so it's held
+/// as raw JSON and never rebuilt.
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct EmoteRoomsContent {
     #[serde(default)]
     pub rooms: BTreeMap<String, BTreeMap<String, serde_json::Value>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -111,7 +152,8 @@ pub struct ImagePackDto {
     pub attribution: Option<String>,
     pub images: Vec<PackImageDto>,
     /// Whether this pack is carried outside the room it belongs to — the
-    /// `im.ponies.emote_rooms` list. Always true for the personal pack.
+    /// `m.image_pack.rooms` list. Always true for the MSC's personal pack,
+    /// which is account data and so has no room to be outside of.
     ///
     /// Not a filter: everything returned here is usable where it was asked for,
     /// including a room's own packs in that room. This says whether it follows
@@ -203,20 +245,40 @@ pub async fn user_pack(core: &MatrixCore) -> Result<Option<ImagePackContent>> {
     }))
 }
 
-/// The rooms whose packs the user has enabled everywhere.
-pub async fn emote_rooms(core: &MatrixCore) -> Result<EmoteRoomsContent> {
-    let raw = core
-        .client
-        .account()
-        .account_data_raw(EMOTE_ROOMS.into())
-        .await?;
+/// One account data event, or an empty one if it's missing or unreadable.
+async fn read_pack_rooms(core: &MatrixCore, event_type: &str) -> Result<EmoteRoomsContent> {
+    let raw = core.client.account().account_data_raw(event_type.into()).await?;
 
     Ok(raw
         .and_then(|raw| raw.deserialize_as_unchecked::<EmoteRoomsContent>().ok())
         .unwrap_or_default())
 }
 
+/// The rooms whose packs the user has enabled everywhere.
+///
+/// The union of the two event names: a pack turned on from a client that only
+/// knows one of them is still turned on here. Turning one off writes both, so
+/// the two can't drift apart once we've touched them.
+pub async fn emote_rooms(core: &MatrixCore) -> Result<EmoteRoomsContent> {
+    let mut merged = read_pack_rooms(core, PACK_ROOMS).await?;
+    let legacy = read_pack_rooms(core, PACK_ROOMS_LEGACY).await?;
+
+    for (room, keys) in legacy.rooms {
+        let entry = merged.rooms.entry(room).or_default();
+        for (state_key, opaque) in keys {
+            entry.entry(state_key).or_insert(opaque);
+        }
+    }
+
+    Ok(merged)
+}
+
 /// Every pack in one room, with its state key.
+///
+/// Read under both names and merged by state key. A room whose packs were
+/// written by a client that knows both — including this one — holds each pack
+/// twice, and they're the same pack; the spec's name wins so that whichever
+/// client last wrote it, the newer shape is the one shown.
 pub async fn room_packs(
     core: &MatrixCore,
     room_id: &RoomId,
@@ -227,36 +289,47 @@ pub async fn room_packs(
         return Ok(Vec::new());
     };
 
-    let events = room.get_state_events(StateEventType::from(ROOM_EMOTES)).await?;
+    // Insertion order is the reading order, so the stable name is seen first and
+    // `or_insert` leaves it in place.
+    let mut merged: BTreeMap<String, ImagePackContent> = BTreeMap::new();
 
-    let mut out = Vec::new();
-    for event in events {
-        // Read the raw JSON rather than a typed event: ruma has no type for
-        // `im.ponies.room_emotes`, and the state key and content are both right
-        // there. A pack whose key we can't read has no stable identity, so it's
-        // skipped rather than guessed at.
-        let value = match &event {
-            RawAnySyncOrStrippedState::Sync(raw) => {
-                raw.deserialize_as_unchecked::<serde_json::Value>()
-            }
-            RawAnySyncOrStrippedState::Stripped(raw) => {
-                raw.deserialize_as_unchecked::<serde_json::Value>()
-            }
-        };
-        let Ok(value) = value else { continue };
-        let Some(state_key) = value.get("state_key").and_then(|k| k.as_str()) else {
-            continue;
-        };
-        let Some(content) = value.get("content") else { continue };
+    for event_type in [ROOM_PACK, ROOM_PACK_LEGACY] {
+        let events = room.get_state_events(StateEventType::from(event_type)).await?;
 
-        match serde_json::from_value::<ImagePackContent>(content.clone()) {
-            Ok(pack) if !pack.images.is_empty() => out.push((state_key.to_owned(), pack)),
-            Ok(_) => {}
-            Err(e) => tracing::warn!("ignoring an unreadable {ROOM_EMOTES} in {room_id}: {e}"),
+        for event in events {
+            // Read the raw JSON rather than a typed event: ruma has no type for
+            // either name, and the state key and content are both right there. A
+            // pack whose key we can't read has no stable identity, so it's
+            // skipped rather than guessed at.
+            let value = match &event {
+                RawAnySyncOrStrippedState::Sync(raw) => {
+                    raw.deserialize_as_unchecked::<serde_json::Value>()
+                }
+                RawAnySyncOrStrippedState::Stripped(raw) => {
+                    raw.deserialize_as_unchecked::<serde_json::Value>()
+                }
+            };
+            let Ok(value) = value else { continue };
+            let Some(state_key) = value.get("state_key").and_then(|k| k.as_str()) else {
+                continue;
+            };
+            let Some(content) = value.get("content") else { continue };
+
+            match serde_json::from_value::<ImagePackContent>(content.clone()) {
+                // An empty pack is how a pack gets removed — state events can't
+                // be deleted — so it isn't offered as one.
+                Ok(pack) if !pack.images.is_empty() => {
+                    merged.entry(state_key.to_owned()).or_insert(pack);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("ignoring an unreadable {event_type} in {room_id}: {e}")
+                }
+            }
         }
     }
 
-    Ok(out)
+    Ok(merged.into_iter().collect())
 }
 
 /// Every pack available for use right now.
@@ -384,24 +457,60 @@ pub async fn save_user_pack(core: &MatrixCore, content: ImagePackContent) -> Res
     Ok(())
 }
 
-/// Replace one of a room's packs.
+/// Replace one of a room's packs, under both names.
 ///
 /// State events can't be deleted, so removing a pack means writing an empty
-/// one; readers treat a pack with no images as nothing at all.
+/// one; readers treat a pack with no images as nothing at all. Both names are
+/// written for the same reason: leaving one behind would resurrect a deleted
+/// pack for whichever client reads that one.
+///
+/// The pack's `usage` is recomputed on the way out, so a client that only
+/// understands pack-level usage — everything following the spec rather than the
+/// MSC — still puts these images in the right picker.
 pub async fn save_room_pack(
     core: &MatrixCore,
     room_id: &RoomId,
     state_key: &str,
-    content: ImagePackContent,
+    mut content: ImagePackContent,
 ) -> Result<()> {
     let room = core.room(&room_id.to_owned())?;
+    derive_pack_usage(&mut content);
+
     let body = serde_json::to_value(&content).map_err(|e| Error::Other(e.to_string()))?;
 
-    room.send_state_event_raw(ROOM_EMOTES, state_key, body).await?;
+    for event_type in [ROOM_PACK, ROOM_PACK_LEGACY] {
+        room.send_state_event_raw(event_type, state_key, body.clone()).await?;
+    }
     Ok(())
 }
 
-/// Carry a room's pack everywhere, or stop.
+/// Set the pack's own usage to the union of what its images are for.
+///
+/// Per-image usage is an MSC2545 field the spec doesn't have, so a spec-only
+/// reader sees only this. The union is the honest summary: a pack of emotes
+/// says emoticon, a pack of stickers says sticker, a mixed one says both and
+/// its images turn up in both pickers there — which is worse than our own
+/// rendering, but better than being missing from one.
+fn derive_pack_usage(content: &mut ImagePackContent) {
+    let pack_usage = content.pack.as_ref().and_then(|p| p.usage.clone());
+
+    let (mut any_emoticon, mut any_sticker) = (false, false);
+    for image in content.images.values() {
+        let (emoticon, sticker) = usage_of(image.usage.as_ref().or(pack_usage.as_ref()));
+        any_emoticon |= emoticon;
+        any_sticker |= sticker;
+    }
+
+    // An empty pack keeps whatever it said before; there's nothing to summarise.
+    if content.images.is_empty() {
+        return;
+    }
+
+    content.pack.get_or_insert_with(PackInfo::default).usage =
+        usage_list(any_emoticon, any_sticker);
+}
+
+/// Carry a room's pack everywhere, or stop — under both names.
 pub async fn set_everywhere(
     core: &MatrixCore,
     room_id: &RoomId,
@@ -410,28 +519,39 @@ pub async fn set_everywhere(
 ) -> Result<()> {
     use matrix_sdk::ruma::serde::Raw;
 
-    let mut content = emote_rooms(core).await?;
     let room = room_id.to_string();
 
-    if on {
-        content
-            .rooms
-            .entry(room)
-            .or_default()
-            .insert(state_key.to_owned(), serde_json::json!({}));
-    } else {
-        if let Some(keys) = content.rooms.get_mut(&room) {
-            keys.remove(state_key);
+    for event_type in [PACK_ROOMS, PACK_ROOMS_LEGACY] {
+        // Read each event on its own rather than writing the merged view to
+        // both: the two can hold different unknown fields, and this is the one
+        // place they'd be flattened into each other.
+        let mut content = read_pack_rooms(core, event_type).await?;
+
+        if on {
+            content
+                .rooms
+                .entry(room.clone())
+                .or_default()
+                // The innermost object is reserved for future use and the spec
+                // asks that it be preserved, so an entry that already exists is
+                // left exactly as it was.
+                .entry(state_key.to_owned())
+                .or_insert_with(|| serde_json::json!({}));
+        } else {
+            if let Some(keys) = content.rooms.get_mut(&room) {
+                keys.remove(state_key);
+            }
+            // A room with no packs left shouldn't linger as an empty object.
+            content.rooms.retain(|_, keys| !keys.is_empty());
         }
-        // A room with no packs left shouldn't linger as an empty object.
-        content.rooms.retain(|_, keys| !keys.is_empty());
+
+        let raw = Raw::new(&content).map_err(|e| Error::Other(e.to_string()))?;
+        core.client
+            .account()
+            .set_account_data_raw(event_type.into(), raw.cast_unchecked())
+            .await?;
     }
 
-    let raw = Raw::new(&content).map_err(|e| Error::Other(e.to_string()))?;
-    core.client
-        .account()
-        .set_account_data_raw(EMOTE_ROOMS.into(), raw.cast_unchecked())
-        .await?;
     Ok(())
 }
 
@@ -489,18 +609,101 @@ pub enum PackEdit {
 /// Colons would make the code unparseable in `:name:` form, and whitespace
 /// makes it untypeable; both are rejected rather than silently mangled.
 fn check_shortcode(shortcode: &str) -> Result<String> {
+    /// The spec's grammar: `1*100shortcode_char`, where a char is
+    /// `ALPHA / DIGIT / "-" / "_"`.
+    const MAX_LENGTH: usize = 100;
+
     let trimmed = shortcode.trim();
 
     if trimmed.is_empty() {
         return Err(Error::Other("a shortcode needs a name~".into()));
     }
-    if trimmed.contains(':') || trimmed.chars().any(char::is_whitespace) {
+    if trimmed.chars().count() > MAX_LENGTH {
+        return Err(Error::Other(format!(
+            "shortcodes can be at most {MAX_LENGTH} characters"
+        )));
+    }
+    if !trimmed.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(Error::Other(
-            "shortcodes can't contain spaces or colons".into(),
+            "shortcodes can only use letters, numbers, - and _".into(),
         ));
     }
 
     Ok(trimmed.to_owned())
+}
+
+/// Make a pack of your own, in a room that exists only to hold it.
+///
+/// The spec has no personal pack: images live in rooms, and the list of packs
+/// you carry everywhere points at them. A pack "of your own" is therefore a
+/// pack in a room nobody else is in — so this makes that room, puts the pack in
+/// it, and turns it on everywhere, and the UI never mentions the room at all.
+///
+/// Unencrypted on purpose. Pack images are plain `mxc://` URLs by definition —
+/// every client renders them without keys — so encrypting the room would buy
+/// nothing and cost the ability to read the pack from a fresh login.
+pub async fn create_personal_pack(core: &MatrixCore, name: &str) -> Result<String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(Error::Other("give the pack a name first~".into()));
+    }
+
+    let created = super::rooms::create(
+        core,
+        super::rooms::NewRoom {
+            name: name.to_owned(),
+            topic: Some("holds an image pack".to_owned()),
+            is_public: false,
+            alias: None,
+            encrypted: false,
+            invite: Vec::new(),
+            parent_space: None,
+        },
+    )
+    .await?;
+
+    let room_id = RoomId::parse(&created.room_id)?;
+    let state_key = state_key_for(name);
+
+    let content = ImagePackContent {
+        pack: Some(PackInfo {
+            display_name: Some(name.to_owned()),
+            ..PackInfo::default()
+        }),
+        ..ImagePackContent::default()
+    };
+
+    save_room_pack(core, &room_id, &state_key, content).await?;
+    set_everywhere(core, &room_id, &state_key, true).await?;
+
+    Ok(created.room_id)
+}
+
+/// A readable, room-unique state key for a new pack.
+///
+/// Only ever seen in a state-event dump, so it's a slug of the name rather than
+/// a random id — and falls back to one when the name has nothing sluggable in
+/// it, since a state key still has to exist.
+fn state_key_for(name: &str) -> String {
+    let slug: String = name
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect();
+
+    let slug = slug.trim_matches('-').to_owned();
+    if slug.is_empty() { format!("pack-{}", uuid_ish()) } else { slug }
+}
+
+/// Enough randomness to keep two unnameable packs apart.
+fn uuid_ish() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis().to_string())
+        .unwrap_or_else(|_| "0".to_owned())
 }
 
 /// Apply one edit to a pack, reading it first and writing it back.
@@ -527,17 +730,25 @@ pub async fn edit(core: &MatrixCore, target: PackTarget, edit: PackEdit) -> Resu
             }
 
             let shortcode = check_shortcode(&shortcode)?;
-            let info = ImageInfo { w: width, h: height, size, mimetype };
 
-            content.images.insert(
-                shortcode,
-                PackImage {
-                    url,
-                    body: body.filter(|b| !b.trim().is_empty()),
-                    info: Some(info),
-                    usage: usage_list(is_emoticon, is_sticker),
-                },
-            );
+            // Built on top of whatever is already under that shortcode, so
+            // changing one thing about an image doesn't drop the fields the
+            // client that made it knew about and we don't. A detail the caller
+            // left out keeps its old value rather than being cleared.
+            let mut image = content.images.remove(&shortcode).unwrap_or_default();
+            let mut info = image.info.unwrap_or_default();
+
+            info.w = width.or(info.w);
+            info.h = height.or(info.h);
+            info.size = size.or(info.size);
+            info.mimetype = mimetype.or(info.mimetype);
+
+            image.url = url;
+            image.body = body.filter(|b| !b.trim().is_empty()).or(image.body);
+            image.info = Some(info);
+            image.usage = usage_list(is_emoticon, is_sticker);
+
+            content.images.insert(shortcode, image);
         }
 
         PackEdit::Rename { from, to } => {
@@ -607,9 +818,12 @@ pub async fn can_edit_packs(core: &MatrixCore, room_id: &RoomId) -> bool {
     let Ok(room) = core.room(&room_id.to_owned()) else { return false };
     let Ok(user_id) = core.own_user_id() else { return false };
 
-    room.power_levels_or_default()
-        .await
-        .user_can_send_state(&user_id, StateEventType::from(ROOM_EMOTES))
+    // Both names have to be writable: a pack written under one and not the
+    // other would look deleted to half the clients that read it.
+    let levels = room.power_levels_or_default().await;
+    [ROOM_PACK, ROOM_PACK_LEGACY]
+        .into_iter()
+        .all(|event_type| levels.user_can_send_state(&user_id, StateEventType::from(event_type)))
 }
 
 fn to_dto(
@@ -754,12 +968,89 @@ mod tests {
     }
 
     #[test]
-    fn a_shortcode_has_to_be_typeable() {
-        assert_eq!(check_shortcode("  blobcat ").unwrap(), "blobcat");
+    fn a_shortcode_follows_the_specs_grammar() {
+        // ALPHA / DIGIT / "-" / "_", 1 to 100 of them.
+        assert_eq!(check_shortcode("  blob-cat_2 ").unwrap(), "blob-cat_2");
+        assert!(check_shortcode(&"a".repeat(100)).is_ok());
 
-        for bad in ["", "   ", "blob cat", "blob:cat", ":blobcat:"] {
+        for bad in ["", "   ", "blob cat", "blob:cat", ":blobcat:", "blob+cat", "ačiū"] {
             assert!(check_shortcode(bad).is_err(), "{bad:?} should be refused");
         }
+        assert!(check_shortcode(&"a".repeat(101)).is_err());
+    }
+
+    #[test]
+    fn editing_a_pack_keeps_fields_we_dont_understand() {
+        // A pack made by a client that knows something we don't must survive
+        // being read, changed and written back.
+        let pack = parse(serde_json::json!({
+            "images": {
+                "blobcat": { "url": "mxc://veil.gg/a", "im.ponies.future": "keep me" }
+            },
+            "pack": { "display_name": "blobs", "attribution": "someone" },
+            "org.example.whole_pack": { "nested": true }
+        }));
+
+        let round_tripped = serde_json::to_value(&pack).unwrap();
+        assert_eq!(round_tripped["org.example.whole_pack"]["nested"], true);
+        assert_eq!(round_tripped["images"]["blobcat"]["im.ponies.future"], "keep me");
+        assert_eq!(round_tripped["pack"]["attribution"], "someone");
+    }
+
+    #[test]
+    fn the_opaque_object_in_pack_rooms_survives() {
+        // The spec reserves the innermost object for future use and asks that
+        // clients preserve what they find there.
+        let content: EmoteRoomsContent = serde_json::from_value(serde_json::json!({
+            "rooms": { "!r:veil.gg": { "blobs": { "org.example.pinned": 1 } } },
+            "org.example.top": "hello"
+        }))
+        .unwrap();
+
+        let out = serde_json::to_value(&content).unwrap();
+        assert_eq!(out["rooms"]["!r:veil.gg"]["blobs"]["org.example.pinned"], 1);
+        assert_eq!(out["org.example.top"], "hello");
+    }
+
+    #[test]
+    fn pack_usage_summarises_its_images() {
+        let mut pack = parse(serde_json::json!({
+            "images": {
+                "a": { "url": "mxc://veil.gg/a", "usage": ["emoticon"] },
+                "b": { "url": "mxc://veil.gg/b", "usage": ["emoticon"] }
+            }
+        }));
+        derive_pack_usage(&mut pack);
+        assert_eq!(pack.pack.unwrap().usage, Some(vec!["emoticon".to_owned()]));
+
+        // A mixed pack says both, so a reader that only understands pack-level
+        // usage surfaces it in both pickers rather than neither.
+        let mut pack = parse(serde_json::json!({
+            "images": {
+                "a": { "url": "mxc://veil.gg/a", "usage": ["emoticon"] },
+                "b": { "url": "mxc://veil.gg/b", "usage": ["sticker"] }
+            }
+        }));
+        derive_pack_usage(&mut pack);
+        assert_eq!(pack.pack.unwrap().usage, None);
+    }
+
+    #[test]
+    fn an_empty_pack_keeps_the_usage_it_had() {
+        // Removing the last image shouldn't rewrite what the pack is for.
+        let mut pack = parse(serde_json::json!({
+            "images": {},
+            "pack": { "usage": ["sticker"] }
+        }));
+        derive_pack_usage(&mut pack);
+        assert_eq!(pack.pack.unwrap().usage, Some(vec!["sticker".to_owned()]));
+    }
+
+    #[test]
+    fn a_state_key_is_a_slug_of_the_name() {
+        assert_eq!(state_key_for("The Blob Pack"), "the-blob-pack");
+        assert_eq!(state_key_for("  spaces  "), "spaces");
+        assert!(state_key_for("🐱🐱").starts_with("pack-"));
     }
 
     #[test]

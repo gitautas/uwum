@@ -7,12 +7,14 @@ const getAllImagePacks = vi.fn();
 const getPackRooms = vi.fn();
 const editImagePack = vi.fn().mockResolvedValue(undefined);
 const setPackEverywhere = vi.fn().mockResolvedValue(undefined);
+const createPersonalPack = vi.fn().mockResolvedValue("!made:veil.gg");
 
 vi.mock("../lib/ipc", () => ({
   getAllImagePacks: () => getAllImagePacks(),
   getPackRooms: () => getPackRooms(),
   editImagePack: (...args: unknown[]) => editImagePack(...args),
   setPackEverywhere: (...args: unknown[]) => setPackEverywhere(...args),
+  createPersonalPack: (...args: unknown[]) => createPersonalPack(...args),
   uploadMedia: vi.fn(),
   asUwuError: (e: unknown) => ({ kind: "other", message: String(e) }),
   // The grid asks for a thumbnail; there's no protocol handler in a test.
@@ -68,11 +70,31 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("PacksSection", () => {
-  it("lists your pack and the room packs", async () => {
+  it("lists the room packs and any personal pack the account already has", async () => {
     render(<PacksSection />);
 
     expect(await screen.findByDisplayValue("your emotes")).toBeTruthy();
     expect(screen.getByText("the blob pack")).toBeTruthy();
+  });
+
+  it("makes a pack of your own, as many as asked for", async () => {
+    render(<PacksSection />);
+
+    const name = await screen.findByRole("textbox", { name: "new personal pack name" });
+    fireEvent.change(name, { target: { value: "blobs" } });
+    fireEvent.click(screen.getAllByRole("button", { name: "make it~" })[0]);
+
+    await waitFor(() => expect(createPersonalPack).toHaveBeenCalledWith("blobs"));
+  });
+
+  it("doesn't offer a personal pack card when the account has never had one", async () => {
+    // The MSC's account-data pack can't be created here, so an empty one is
+    // not something to show an editor for.
+    getAllImagePacks.mockResolvedValue([{ ...MINE, images: [] }, THEIRS]);
+    render(<PacksSection />);
+
+    await screen.findByText("the blob pack");
+    expect(screen.queryByDisplayValue("your emotes")).toBeNull();
   });
 
   it("keeps a pack you can't edit read-only", async () => {
@@ -81,14 +103,16 @@ describe("PacksSection", () => {
 
     // Editable packs get a name field; this one is plain text.
     expect(screen.queryByDisplayValue("the blob pack")).toBeNull();
-    // And its images can't be opened for editing.
-    expect(screen.getAllByRole("button", { name: ":blobcat:" })[1]).toHaveProperty(
+    // And its images can't be opened for editing. Room packs render first, so
+    // the locked pack's cell is the first one.
+    expect(screen.getAllByRole("button", { name: ":blobcat:" })[0]).toHaveProperty(
       "disabled",
       true,
     );
   });
 
   it("opens an editor for an image in a pack you own", async () => {
+    getAllImagePacks.mockResolvedValue([MINE]);
     render(<PacksSection />);
     const cells = await screen.findAllByRole("button", { name: ":blobcat:" });
 
@@ -100,6 +124,7 @@ describe("PacksSection", () => {
   });
 
   it("sends a rename as a rename, not a fresh image", async () => {
+    getAllImagePacks.mockResolvedValue([MINE]);
     render(<PacksSection />);
     fireEvent.click((await screen.findAllByRole("button", { name: ":blobcat:" }))[0]);
 
@@ -116,6 +141,7 @@ describe("PacksSection", () => {
   });
 
   it("turns a usage off without losing the rest of the image", async () => {
+    getAllImagePacks.mockResolvedValue([MINE]);
     render(<PacksSection />);
     fireEvent.click((await screen.findAllByRole("button", { name: ":blobcat:" }))[0]);
     fireEvent.click(screen.getByRole("switch", { name: "sticker" }));
@@ -137,6 +163,7 @@ describe("PacksSection", () => {
   });
 
   it("removes an image", async () => {
+    getAllImagePacks.mockResolvedValue([MINE]);
     render(<PacksSection />);
     fireEvent.click((await screen.findAllByRole("button", { name: ":blobcat:" }))[0]);
     fireEvent.click(screen.getByRole("button", { name: "remove :blobcat:" }));
@@ -167,7 +194,8 @@ describe("PacksSection", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "new pack name" }), {
       target: { value: "Blob Pack" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "make it~" }));
+    // Two "make it~" buttons now: one for a pack of your own, one for a room.
+    fireEvent.click(screen.getAllByRole("button", { name: "make it~" })[1]);
 
     await waitFor(() =>
       expect(editImagePack).toHaveBeenCalledWith(

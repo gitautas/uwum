@@ -262,6 +262,12 @@ pub async fn set_pack_everywhere(
     .await
 }
 
+/// Make a pack of your own, in a room created to hold it.
+#[tauri::command]
+pub async fn create_personal_pack(state: State<'_, AppState>, name: String) -> Result<String> {
+    packs::create_personal_pack(&*state.core().await?, &name).await
+}
+
 /// Rooms this account may create or edit packs in.
 #[tauri::command]
 pub async fn get_pack_rooms(state: State<'_, AppState>) -> Result<Vec<packs::PackRoomDto>> {

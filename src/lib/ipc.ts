@@ -191,6 +191,16 @@ export const editImagePack = (target: PackTarget, edit: PackEdit) =>
 export const setPackEverywhere = (roomId: string, stateKey: string, everywhere: boolean) =>
   invoke<void>("set_pack_everywhere", { roomId, stateKey, everywhere });
 
+/**
+ * Make a pack of your own.
+ *
+ * Packs live in rooms, so this makes a private one to hold it and turns the
+ * pack on everywhere. Resolves to the room's ID, which the UI has no reason to
+ * show anyone.
+ */
+export const createPersonalPack = (name: string) =>
+  invoke<string>("create_personal_pack", { name });
+
 /** Resolves to `true` once there's nothing older left to load. */
 export const paginateBack = (roomId: string, threadRoot?: string) =>
   invoke<boolean>("paginate_back", { roomId, threadRoot: threadRoot ?? null });

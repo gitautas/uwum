@@ -1,11 +1,15 @@
 /**
  * Making and editing custom emote and sticker packs.
  *
- * Two kinds of pack, and the difference is who they belong to: the personal one
- * follows the account and nobody else can see it, and a room pack is the room's
- * — everyone in it gets the emotes, and editing needs the power level to send
- * state there. Both are MSC2545, so a pack made here shows up in FluffyChat and
- * Cinny, and theirs show up here.
+ * Every pack lives in a room — that's the whole of Matrix's model — and the
+ * only real difference between "mine" and "ours" is who else is in that room.
+ * A pack of your own gets a private room made for it, which is why there's no
+ * limit on how many you can have; a pack in a room you share is the room's, and
+ * editing it needs the power level to send state there.
+ *
+ * Accounts that used an older client may also have the MSC's single personal
+ * pack in account data. It's shown and editable when it exists, but nothing
+ * here makes a new one: it can't be duplicated, and rooms can.
  *
  * Every change is one edit sent to the backend, which reads the pack and writes
  * it back, rather than this screen posting a whole pack it snapshotted a minute
@@ -70,7 +74,10 @@ export function PacksSection() {
     }
   }
 
-  const mine = packs?.find((p) => p.source === "user");
+  // The personal pack only exists on accounts that have used a client which
+  // makes one; there's no way to create another, so it's shown when it's there
+  // and never advertised when it isn't.
+  const legacyPack = packs?.find((p) => p.source === "user" && p.images.length > 0);
   const roomPacks = packs?.filter((p) => p.source === "room") ?? [];
 
   return (
@@ -83,20 +90,20 @@ export function PacksSection() {
         </div>
       ) : (
         <>
-          {mine && <PackCard pack={mine} busy={busy} onRun={run} />}
-
-          <RaveLabel style={{ padding: "18px 4px 8px" }}>room packs</RaveLabel>
-          {roomPacks.length === 0 ? (
+          {roomPacks.length === 0 && !legacyPack ? (
             <Card>
               <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-                none of your rooms have packs yet. make one below and everyone in that
-                room gets it.
+                no packs yet. make as many as you like — one for your own images, or
+                one in a room to share with everyone in it.
               </div>
             </Card>
           ) : (
-            roomPacks.map((pack) => (
-              <PackCard key={pack.id} pack={pack} busy={busy} onRun={run} />
-            ))
+            <>
+              {roomPacks.map((pack) => (
+                <PackCard key={pack.id} pack={pack} busy={busy} onRun={run} />
+              ))}
+              {legacyPack && <PackCard pack={legacyPack} busy={busy} onRun={run} />}
+            </>
           )}
 
           <NewPack rooms={rooms} busy={busy} onRun={run} />
@@ -458,21 +465,70 @@ function NewPack({
 }) {
   const [roomId, setRoomId] = useState("");
   const [name, setName] = useState("");
-
-  if (rooms.length === 0) {
-    return (
-      <Card>
-        <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.55 }}>
-          a shared pack needs a room you can send state in. you don't have one yet —
-          make a room and you'll be able to put a pack in it.
-        </div>
-      </Card>
-    );
-  }
+  const [mineName, setMineName] = useState("");
 
   return (
+    <>
+      <Card>
+        <RaveLabel style={{ marginBottom: 10 }}>new pack of your own</RaveLabel>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input
+            value={mineName}
+            onChange={(e) => setMineName(e.target.value)}
+            placeholder="pack name"
+            aria-label="new personal pack name"
+            style={{ ...inputStyle, flex: 1, minWidth: 150 }}
+          />
+          <Button
+            disabled={busy || !mineName.trim()}
+            onClick={() =>
+              void onRun(async () => {
+                await ipc.createPersonalPack(mineName.trim());
+                setMineName("");
+              })
+            }
+          >
+            make it~
+          </Button>
+        </div>
+        <div
+          style={{
+            marginTop: 10,
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+            lineHeight: 1.5,
+          }}
+        >
+          as many as you like. each one gets a private room to live in — matrix keeps
+          packs in rooms — and is turned on everywhere straight away.
+        </div>
+      </Card>
+
+      {rooms.length > 0 && <NewRoomPack rooms={rooms} busy={busy} onRun={onRun} roomId={roomId} setRoomId={setRoomId} name={name} setName={setName} />}
+    </>
+  );
+}
+
+function NewRoomPack({
+  rooms,
+  busy,
+  onRun,
+  roomId,
+  setRoomId,
+  name,
+  setName,
+}: {
+  rooms: PackRoom[];
+  busy: boolean;
+  onRun: (action: () => Promise<void>) => Promise<void>;
+  roomId: string;
+  setRoomId: (id: string) => void;
+  name: string;
+  setName: (name: string) => void;
+}) {
+  return (
     <Card>
-      <RaveLabel style={{ marginBottom: 10 }}>new room pack</RaveLabel>
+      <RaveLabel style={{ marginBottom: 10 }}>new pack in a room</RaveLabel>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <select
           value={roomId}

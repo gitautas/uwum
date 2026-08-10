@@ -54,6 +54,7 @@ pub fn run() {
             commands::edit_image_pack,
             commands::set_pack_everywhere,
             commands::get_pack_rooms,
+            commands::create_personal_pack,
             // timeline
             commands::open_timeline,
             commands::close_timeline,
