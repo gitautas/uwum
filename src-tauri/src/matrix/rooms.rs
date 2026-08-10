@@ -657,53 +657,6 @@ pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
 /// you're invited back. For a room only you were in, that is as close to
 /// deletion as the protocol gets; for any other room, everyone else's copy
 /// carries on without you. The UI says which of those is happening.
-pub async fn leave(core: &MatrixCore, room_id: &RoomId, forget: bool) -> Result<()> {
-    let room = core.room(&room_id.to_owned())?;
-
-    // Before anything else: stop watching this room. An open timeline is a live
-    // subscriber to the room's event-cache rows, and leaving — forgetting
-    // especially — pulls those rows out from under it. The frontend closes the
-    // timeline when it deselects the room, but that's a different call over a
-    // different channel, so it can't be relied on to have happened first.
-    crate::matrix::timeline::close_all_for_room(core, room_id).await;
-
-    room.leave().await?;
-
-    if forget {
-        // `forget` refuses outright while the room still looks joined, and
-        // `leave` only sends the request — the local state doesn't turn to Left
-        // until the sync carrying that leave comes back. Forgetting straight
-        // afterwards therefore fails, and then the leave lands and the room
-        // reappears in the list with "you left" as its last event, which is
-        // exactly what it looks like from the outside: a room that won't go
-        // away until you forget it twice.
-        if !wait_until_left(&room).await {
-            return Err(Error::Other(
-                "left it, but your server hasn't caught up yet, so it isn't \
-                 forgotten. try again in a moment~"
-                    .into(),
-            ));
-        }
-        room.forget().await?;
-    }
-
-    Ok(())
-}
-
-/// Wait for a leave to come back round through sync. `false` on timeout.
-async fn wait_until_left(room: &Room) -> bool {
-    use tokio::time::{Duration, Instant, sleep};
-
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        if matches!(room.state(), RoomState::Left | RoomState::Banned) {
-            return true;
-        }
-        sleep(Duration::from_millis(150)).await;
-    }
-    false
-}
-
 pub async fn set_typing(core: &MatrixCore, room_id: &RoomId, typing: bool) -> Result<()> {
     core.room(&room_id.to_owned())?.typing_notice(typing).await?;
     Ok(())

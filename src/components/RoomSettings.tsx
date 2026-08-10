@@ -3,18 +3,19 @@ import { useEffect, useState } from "react";
 import * as ipc from "../lib/ipc";
 import type { RoomPermissions, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
-import { Button, Icon, Modal, RaveLabel, Toggle } from "./ui";
+import { Button, Modal } from "./ui";
 
 /**
- * Renaming a room, and getting out of one.
+ * Renaming a room.
  *
  * A dialog rather than another section in the room panel: that panel is a
- * narrow column that already carries the member list, and neither of these is
- * something you do while reading.
+ * narrow column that already carries the member list.
  *
- * The editing half only appears when this account can actually change the
- * thing — a disabled field you can't act on is just clutter. Permissions are
- * read once per room rather than carried on every room summary.
+ * The fields only appear when this account can actually change the thing — a
+ * disabled input you can't act on is just clutter. Permissions are read once
+ * per room rather than carried on every room summary.
+ *
+ * There is deliberately no way to leave a room here; see PLAN.md.
  */
 export function RoomSettingsDialog({
   room,
@@ -50,7 +51,6 @@ export function RoomSettingsDialog({
           </div>
         )
       )}
-      <LeaveRoom room={room} onLeft={onClose} />
     </Modal>
   );
 }
@@ -126,102 +126,6 @@ function RoomEditor({
           </Button>
         </div>
       )}
-    </>
-  );
-}
-
-function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) {
-  const showBanner = useStore((s) => s.showBanner);
-  const selectRoom = useStore((s) => s.selectRoom);
-  const markLeaving = useStore((s) => s.markLeaving);
-  const unmarkLeaving = useStore((s) => s.unmarkLeaving);
-  const [confirming, setConfirming] = useState(false);
-  const [forget, setForget] = useState(false);
-
-  // Reset when switching rooms, so a half-opened confirmation doesn't follow
-  // you to the next one.
-  useEffect(() => {
-    setConfirming(false);
-    setForget(false);
-  }, [room.id]);
-
-  const alone = room.memberCount <= 1;
-
-  async function leave() {
-    // Look away first, and take the room out of the sidebar while we're at it.
-    // The server needs a round trip and a sync to agree that we've left, and
-    // until then the room is still joined: it stays listed, stays clickable,
-    // and typing in it produces nothing but 403s. The open timeline is also a
-    // subscriber to storage that forgetting is about to delete.
-    markLeaving(room.id);
-    onLeft();
-    await selectRoom(null);
-
-    try {
-      await ipc.leaveRoom(room.id, forget);
-    } catch (e) {
-      // Still in it after all — put it back where it was.
-      unmarkLeaving(room.id);
-      showBanner("error", ipc.asUwuError(e).message);
-    }
-  }
-
-  if (!confirming) {
-    return (
-      <>
-        <RaveLabel style={{ padding: "22px 0 8px" }}>leaving</RaveLabel>
-        <Button variant="danger" size="sm" onClick={() => setConfirming(true)}>
-          leave {room.isDirect ? "this chat" : "this room"}
-        </Button>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <RaveLabel style={{ padding: "22px 0 8px" }}>leaving</RaveLabel>
-      <div
-        style={{
-          background: "var(--surface-card)",
-          border: "1px solid rgba(255,84,112,.35)",
-          borderRadius: 20,
-          padding: 14,
-        }}
-      >
-        <div style={{ fontSize: 12.5, color: "var(--text-secondary)", lineHeight: 1.5 }}>
-          {alone
-            ? "you're the only one here, so nobody will be left in it."
-            : "everyone else keeps the room; you just won't be in it."}
-          {room.isEncrypted && " this room is encrypted — rejoining won't get the old messages back."}
-        </div>
-
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 12 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontFamily: "var(--font-display)", fontWeight: 700, fontSize: 13 }}>
-              forget it too
-            </div>
-            <div
-              style={{ fontSize: 11.5, color: "var(--text-tertiary)", lineHeight: 1.45 }}
-            >
-              drops it from your account entirely. matrix has no delete — for a
-              room only you were in, this is the closest thing.
-            </div>
-          </div>
-          <Toggle on={forget} onToggle={setForget} label="forget it too" />
-        </div>
-
-        <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-          <Button variant="danger" size="sm" onClick={() => void leave()} style={{ flex: 1 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <Icon name="sign-out" size={13} color="var(--ink-950)" />
-              {forget ? "leave and forget" : "leave"}
-            </span>
-          </Button>
-          <Button variant="ghost" size="sm" onClick={() => setConfirming(false)}>
-            keep it
-          </Button>
-        </div>
-      </div>
     </>
   );
 }

@@ -26,7 +26,6 @@ export function RoomList() {
     setSearch,
     selectRoom,
     openCreateRoom,
-    leavingRooms,
   } = useStore(
     useShallow((s) => ({
       allRooms: s.rooms,
@@ -39,7 +38,6 @@ export function RoomList() {
       setSearch: s.setSearch,
       selectRoom: s.selectRoom,
       openCreateRoom: s.openCreateRoom,
-      leavingRooms: s.leavingRooms,
     })),
   );
 
@@ -55,9 +53,9 @@ export function RoomList() {
   const groups = useMemo(
     () =>
       groupRooms(
-        filterRooms(allRooms, { activeSpaceId, filter, search, spaces, leavingRooms }),
+        filterRooms(allRooms, { activeSpaceId, filter, search, spaces }),
       ),
-    [allRooms, activeSpaceId, filter, search, spaces, leavingRooms],
+    [allRooms, activeSpaceId, filter, search, spaces],
   );
 
   const heading =

@@ -24,7 +24,6 @@ function Dialog() {
   const selectRoom = useStore((s) => s.selectRoom);
   const showBanner = useStore((s) => s.showBanner);
   const refreshSpaces = useStore((s) => s.refreshSpaces);
-  const unmarkLeaving = useStore((s) => s.unmarkLeaving);
   const activeSpaceId = useStore((s) => s.activeSpaceId);
   const space = useStore((s) => s.spaces.find((sp) => sp.id === s.activeSpaceId));
 
@@ -57,7 +56,6 @@ function Dialog() {
       });
 
       close();
-      unmarkLeaving(result.roomId);
       if (result.spaceWarning) showBanner("error", result.spaceWarning);
 
       // The space's children list is only re-read on a slow poll, and the
@@ -83,8 +81,6 @@ function Dialog() {
     try {
       const roomId = await ipc.joinRoom(aliasOrId.trim());
       close();
-      // You can rejoin something you left earlier in this session.
-      unmarkLeaving(roomId);
       await waitForRoom(roomId);
       void selectRoom(roomId);
     } catch (e) {
