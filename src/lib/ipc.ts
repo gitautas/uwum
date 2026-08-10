@@ -313,7 +313,11 @@ export function mediaUrl(
 ): string | undefined {
   if (!mxc || !mxc.startsWith("mxc://")) return undefined;
 
-  const base = `uwum://media/${encodeURIComponent(mxc)}`;
+  // WebView2 serves Tauri custom protocols as http://<scheme>.localhost/..., not
+  // <scheme>://. The Rust handler (media.rs) and the CSP already accept both forms.
+  const base = navigator.userAgent.includes("Windows")
+    ? `http://uwum.localhost/media/${encodeURIComponent(mxc)}`
+    : `uwum://media/${encodeURIComponent(mxc)}`;
   if (!size) return base;
 
   // Ask for 2× so the image stays sharp on retina displays.
