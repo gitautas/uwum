@@ -302,21 +302,41 @@ What this cost, and is worth knowing before touching any of it again:
   The room's own `m.space.parent` lands with the room's own diff, immediately.
   We hold every power in a room we just made, so that half always succeeds; the
   space's half can fail on someone else's space, and only warns.
-- **`forget` refuses while the room still looks joined**, and `leave` only sends
-  the request — the state turns Left when the sync carrying it comes back. So
-  forgetting straight after leaving always failed, and the room reappeared with
-  your own leave as its last event. It now waits for Left, up to ten seconds.
-- **An open timeline is a live subscriber to the room's event-cache rows**, and
-  forgetting deletes exactly those rows. That combination panicked the SDK from
-  a background task — "The chunk is not found" — and took the process with it.
-  Leaving closes every timeline for the room first.
-- **A leave isn't instant, and the room stays joined until it lands.** Left
-  listed, it's clickable, and you can type into a room you've left; every
-  request after that is a 403 and the message dies in the send queue. Rooms with
-  a leave in flight are held in `leavingRooms` and hidden.
-
 Still missing here: editing a room's avatar, and inviting people from anywhere
 other than a room you're already in.
+
+### Leaving a room is deliberately not supported
+
+It was built, and then removed. Don't rebuild it without reading this.
+
+Four separate faults came out of leaving, three of them fixed:
+
+- **`forget` refuses while the room still looks joined.** `leave` only sends the
+  request; the state turns Left when sync brings it back — except `leave_impl`
+  *also* calls `base_client().room_left()` itself, so "is it Left yet" answers
+  yes instantly and means nothing. Forgetting on that signal fires while sync is
+  still working on the room.
+- **An open timeline subscribes to the room's event-cache rows**, and forgetting
+  deletes exactly those rows. That panicked the SDK from a background task —
+  "The chunk is not found" — and took the process down.
+- **Deleting those rows under in-flight writes** produces
+  `FOREIGN KEY constraint failed` from `handle_room_updates`, repeatedly.
+- **And the one that couldn't be fixed from here:** a forgotten room comes back.
+  `forget_room` does remove it from the state store, but a later sync writes it
+  back, and `restore_session` runs with `RoomLoadSettings::All`, which loads
+  every room in that store at startup. So the room returns after a restart,
+  needing to be forgotten again, for ever. The server is not confused — asking
+  for the room's members answers 403 — only the local cache is.
+
+The workaround was to remember forgotten rooms and refuse to show them. That
+worked, and it was still a client-side lie about the contents of its own store,
+so it went too. If this comes back, the honest fixes are upstream: `forget_room`
+needs to stop a room being re-admitted by a sync already in flight, or
+`RoomLoadSettings` needs to not resurrect it.
+
+**Leaving without forgetting never produced a ghost** — a left room is filtered
+by `membership == "left"` and nothing gets deleted — so that is the version
+worth restoring first if this is picked up again.
 
 ---
 

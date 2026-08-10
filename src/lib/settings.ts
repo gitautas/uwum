@@ -19,19 +19,6 @@ export interface Settings {
   sendOnEnter: boolean;
   /** Show the room info panel beside the timeline. */
   showInfoPanel: boolean;
-  /**
-   * Rooms we forgot, which the local cache keeps bringing back.
-   *
-   * Forgetting deletes the room from the state store, and then a later sync
-   * writes it back — `restore_session` loads every room in that store at
-   * startup, so the room returns on the next launch having been forgotten
-   * perfectly well. It is gone as far as the server is concerned: asking for
-   * its members answers 403. Remembering what we forgot is how the list stays
-   * honest about that.
-   *
-   * Cleared for a room when you join or make it again.
-   */
-  forgottenRooms: string[];
 }
 
 export const DEFAULTS: Settings = {
@@ -42,7 +29,6 @@ export const DEFAULTS: Settings = {
   livekitUrl: "",
   sendOnEnter: true,
   showInfoPanel: true,
-  forgottenRooms: [],
 };
 
 const STORAGE_KEY = "uwum:settings";

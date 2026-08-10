@@ -66,19 +66,6 @@ interface State {
   roomsSeq: number;
   /** A resync is in flight; diffs are unreliable until it lands. */
   roomsResyncing: boolean;
-  /**
-   * Rooms we've asked to leave, which the server hasn't confirmed yet.
-   *
-   * A leave takes a round trip plus a sync to come back, and until it does the
-   * room is still joined as far as the room list is concerned — so it sits
-   * there, clickable, and you can type into a room you've left. Every request
-   * that follows is a 403. These are hidden and unselectable in the meantime.
-   *
-   * Kept beside the room list rather than filtered out of it: `rooms` is
-   * applied from diffs whose indices must keep matching the backend's copy, so
-   * nothing may be added to or removed from it locally.
-   */
-  leavingRooms: string[];
   spaces: SpaceSummary[];
   activeSpaceId: string | null;
   activeRoomId: string | null;
@@ -129,12 +116,6 @@ interface Actions {
   setSpaces(spaces: SpaceSummary[]): void;
   /** Re-read the whole room list after a dropped batch. */
   resyncRooms(): Promise<void>;
-  /** Hide a room while its leave is in flight. */
-  markLeaving(roomId: string): void;
-  /** Put it back — the leave failed, or we've joined it again. */
-  unmarkLeaving(roomId: string): void;
-  /** Remember a forgotten room, so the cache can't bring it back. */
-  markForgotten(roomId: string): void;
   /** Re-read the spaces now rather than waiting for the slow poll. */
   refreshSpaces(): Promise<void>;
   setActiveSpace(id: string | null): void;
@@ -178,7 +159,6 @@ const initial: State = {
   rooms: [],
   roomsSeq: 0,
   roomsResyncing: false,
-  leavingRooms: [],
   spaces: [],
   activeSpaceId: null,
   activeRoomId: null,
@@ -239,37 +219,6 @@ export const useStore = create<State & Actions>((set, get) => ({
     set((s) => ({ rooms: applyDiffs(s.rooms, diffs), roomsSeq: seq }));
   },
 
-  markLeaving: (roomId) =>
-    set((s) =>
-      s.leavingRooms.includes(roomId)
-        ? {}
-        : { leavingRooms: [...s.leavingRooms, roomId] },
-    ),
-
-  unmarkLeaving: (roomId) =>
-    set((s) => {
-      // Joining again is the one thing that undoes a forget.
-      const forgottenRooms = s.settings.forgottenRooms.filter((id) => id !== roomId);
-      const settings = { ...s.settings, forgottenRooms };
-      if (forgottenRooms.length !== s.settings.forgottenRooms.length) prefs.save(settings);
-
-      return {
-        leavingRooms: s.leavingRooms.filter((id) => id !== roomId),
-        settings,
-      };
-    }),
-
-  markForgotten: (roomId) =>
-    set((s) => {
-      if (s.settings.forgottenRooms.includes(roomId)) return {};
-      const settings = {
-        ...s.settings,
-        forgottenRooms: [...s.settings.forgottenRooms, roomId],
-      };
-      prefs.save(settings);
-      return { settings };
-    }),
-
   resyncRooms: async () => {
     try {
       get().setRooms(await ipc.getRooms());
@@ -292,8 +241,6 @@ export const useStore = create<State & Actions>((set, get) => ({
   setActiveSpace: (activeSpaceId) => set({ activeSpaceId }),
 
   selectRoom: async (roomId) => {
-    if (roomId && get().leavingRooms.includes(roomId)) return;
-
     const previous = get().activeRoomId;
     const previousThread = get().activeThreadRoot;
     if (previous === roomId) return;
@@ -487,12 +434,7 @@ export function filterRooms(
     filter,
     search,
     spaces,
-    leavingRooms,
-    settings,
-  }: Pick<
-    State,
-    "activeSpaceId" | "filter" | "search" | "spaces" | "leavingRooms" | "settings"
-  >,
+  }: Pick<State, "activeSpaceId" | "filter" | "search" | "spaces">,
 ): RoomSummary[] {
   const needle = search.trim().toLowerCase();
 
@@ -507,13 +449,6 @@ export function filterRooms(
   const visible = rooms.filter((room) => {
     if (room.isSpace) return false;
     if (room.membership === "left" || room.membership === "banned") return false;
-    // Still joined as far as the server is concerned, but on its way out.
-    if (leavingRooms.includes(room.id)) return false;
-    // Forgotten, and resurrected by the local cache. An invite is the one
-    // thing that brings it back: someone asking us in again is not a ghost.
-    if (settings.forgottenRooms.includes(room.id) && room.membership !== "invited") {
-      return false;
-    }
 
     if (activeSpaceId) {
       const inSpace =

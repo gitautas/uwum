@@ -137,20 +137,6 @@ pub async fn close(core: &MatrixCore, room_id: &RoomId, thread_root: Option<&str
     Ok(())
 }
 
-/// Close every timeline for a room — the room's own, and any thread inside it.
-///
-/// Needed before anything that tears the room's storage down underneath them.
-/// Forgetting a room deletes its event-cache rows, and an open timeline is a
-/// live subscriber to exactly those rows: the store starts answering "no rows"
-/// and "FOREIGN KEY constraint failed", and then the SDK panics with "The chunk
-/// is not found" because its linked chunk no longer matches what's on disk.
-pub async fn close_all_for_room(core: &MatrixCore, room_id: &RoomId) {
-    let prefix = format!("{room_id}|");
-    let own = room_id.to_string();
-
-    let mut timelines = core.timelines.lock().await;
-    timelines.retain(|key, _| key != &own && !key.starts_with(&prefix));
-}
 
 async fn get(
     core: &MatrixCore,
