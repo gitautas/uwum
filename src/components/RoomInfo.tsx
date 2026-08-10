@@ -2,16 +2,22 @@ import { useEffect, useState } from "react";
 
 import { accentFor, displayNameFor } from "../lib/display";
 import * as ipc from "../lib/ipc";
-import type { RoomMember, RoomSummary } from "../lib/types";
+import { cachedProfile, loadProfile } from "../lib/profiles";
+import type { Profile, RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
+import { ProfileHeader } from "./ProfileHeader";
 import { RoomSettingsDialog } from "./RoomSettings";
 import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
+
+/** Matches the panel below, so a full-bleed cover is asked for at its width. */
+const PANEL_WIDTH = 296;
 
 export function RoomInfo({ room }: { room: RoomSummary }) {
   const [members, setMembers] = useState<RoomMember[] | null>(null);
   const showBanner = useStore((s) => s.showBanner);
   const openLightbox = useStore((s) => s.openLightbox);
+  const ownUserId = useStore((s) => s.session?.userId);
   // Local rather than in the store: this dialog only exists while the panel
   // that owns the room is on screen.
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -42,13 +48,21 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
   const joined = members ?? [];
   const unverified = joined.filter((m) => m.verification !== "verified").length;
 
+  // A DM is a person, so the top of the panel should be them rather than a
+  // room avatar and a room ID. Not every direct room has exactly one other
+  // member — you can be alone in one, or still be flagged direct after others
+  // joined — so this falls back to the room header whenever it isn't obvious
+  // who the DM is with.
+  const others = joined.filter((m) => m.userId !== ownUserId);
+  const partner = room.isDirect && others.length === 1 ? others[0] : undefined;
+
   return (
     <div
       className="uwu-scroll"
       style={{
         position: "relative",
         zIndex: 1,
-        width: 296,
+        width: PANEL_WIDTH,
         flex: "none",
         borderLeft: "1px solid var(--border-subtle)",
         background: "rgba(17,17,23,.72)",
@@ -83,49 +97,53 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
         <Icon name="pencil-simple" size={13} color="var(--text-secondary)" />
       </button>
 
-      <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-        <button
-          onClick={() => room.avatarUrl && openLightbox(room.avatarUrl, room.name)}
-          aria-label={`${room.name}'s picture, full size`}
-          style={{
-            display: "inline-block",
-            padding: 0,
-            transform: "rotate(-3deg)",
-            cursor: room.avatarUrl ? "zoom-in" : "default",
-          }}
-        >
-          <Avatar
-            id={room.id}
-            name={room.name}
-            mxc={room.avatarUrl}
-            size={76}
-            radius={26}
-            fontSize={26}
-          />
-        </button>
-        <div
-          style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 800,
-            fontSize: 19,
-            marginTop: 12,
-          }}
-        >
-          {room.name}
+      {partner ? (
+        <DmHeader partner={partner} />
+      ) : (
+        <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
+          <button
+            onClick={() => room.avatarUrl && openLightbox(room.avatarUrl, room.name)}
+            aria-label={`${room.name}'s picture, full size`}
+            style={{
+              display: "inline-block",
+              padding: 0,
+              transform: "rotate(-3deg)",
+              cursor: room.avatarUrl ? "zoom-in" : "default",
+            }}
+          >
+            <Avatar
+              id={room.id}
+              name={room.name}
+              mxc={room.avatarUrl}
+              size={76}
+              radius={26}
+              fontSize={26}
+            />
+          </button>
+          <div
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 800,
+              fontSize: 19,
+              marginTop: 12,
+            }}
+          >
+            {room.name}
+          </div>
+          <div
+            className="selectable uwu-ellipsis"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            {room.canonicalAlias ?? room.id}
+          </div>
         </div>
-        <div
-          className="selectable uwu-ellipsis"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            color: "var(--text-tertiary)",
-          }}
-        >
-          {room.canonicalAlias ?? room.id}
-        </div>
-      </div>
+      )}
 
-      {room.topic && (
+      {!partner && room.topic && (
         <div
           className="selectable"
           style={{
@@ -183,6 +201,63 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
         <RoomSettingsDialog room={room} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
+  );
+}
+
+/**
+ * The person on the other end of a DM, drawn the way their profile card is.
+ *
+ * The profile is a separate fetch from the room — cover, bio and status are
+ * MSC4133 fields, not room state — but it's cached, so opening a DM you've
+ * already looked at costs nothing.
+ */
+function DmHeader({ partner }: { partner: RoomMember }) {
+  const name = displayNameFor(partner.userId, partner.displayName);
+  const [profile, setProfile] = useState<Profile | null>(
+    () => cachedProfile(partner.userId) ?? null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    loadProfile(partner.userId)
+      .then((p) => !cancelled && setProfile(p))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [partner.userId]);
+
+  return (
+    <>
+      <ProfileHeader
+        userId={partner.userId}
+        profile={profile}
+        name={name}
+        width={PANEL_WIDTH}
+        avatarSize={72}
+        ring="var(--ink-900)"
+        // Out to the panel's edges, over the padding the rest of it sits in.
+        style={{ margin: "-18px -16px 0", overflow: "hidden" }}
+      />
+
+      {profile?.bio && (
+        <div
+          className="selectable"
+          style={{
+            fontSize: 12.5,
+            color: "var(--text-secondary)",
+            lineHeight: 1.55,
+            padding: "12px 4px 4px",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {profile.bio}
+        </div>
+      )}
+
+      <div style={{ height: 16 }} />
+    </>
   );
 }
 

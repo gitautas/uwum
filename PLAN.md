@@ -209,8 +209,8 @@ this room".
 ## 3. Interface work
 
 Four asks, all frontend except where noted. None of them need a spec — they're
-ours to decide — so what's written down here is the shape and the traps. Two are
-built; two aren't.
+ours to decide — so what's written down here is the shape and the traps. Three
+are built; one isn't.
 
 ### 3a. Zoom into a picture — built
 
@@ -253,25 +253,19 @@ text box, removable, sent with the message when you hit send. This is what makes
   or the draft is cleared, or the WebView holds every screenshot you pasted all
   session.
 
-### 3c. The DM sidebar should show the person, not the room
+### 3c. The DM sidebar shows the person — built
 
-In a DM, `RoomInfo`'s header draws a room avatar and a room ID. There's a person
-on the other side with a cover photo and a bio that we already fetch elsewhere —
-that header should look like the top of their profile card.
+`ProfileHeader` draws cover, avatar, name, handle and status, and both the
+profile card and the top of a DM's sidebar use it, so the two can't drift.
+`RoomInfo` falls back to the room header whenever it can't tell who the DM is
+with — you can be alone in a direct room, or still be flagged direct after
+other people joined — and a DM shows the person's bio where a room would show
+its topic.
 
-**Work** — in `RoomInfo.tsx`, when `room.isDirect`, find the other member
-(the member list is already loaded) and use `get_profile` for their cover, then
-draw cover + avatar + name + status the way `ProfileCard` does. The two should
-share a component rather than growing a second copy of the layout.
-
-**Traps**
-
-- A DM is not guaranteed to have exactly two members, and you might be alone in
-  one. Fall back to the room header.
-- The cover is a *profile* field, not a room field: it changes under you when
-  they change it, and it's the same picture in every DM with them.
-- This is the third caller of `get_profile` — the cache mentioned at the bottom
-  of this file stops being optional here.
+`src/lib/profiles.ts` is the cache the third caller made necessary: one entry
+per user, in-flight requests deduped so two components mounting together ask
+once, five minute freshness, and an explicit invalidate after you edit your own
+profile. Not in the store — nothing about it is UI state.
 
 ### 3d. Room toggles as icons — built
 
@@ -431,14 +425,12 @@ size, worth a cache if cards get opened in bulk.
 
 ## Suggested order
 
-1. The DM sidebar header (3c). Small, and it starts with the profile cache that
-   everything touching profiles now wants.
-2. Room categories (5). The biggest of what's left, and the one that changes how
+1. Room categories (5). The biggest of what's left, and the one that changes how
    the sidebar reads. Backend first: keep `order` and `suggested`, and mark
    which children are spaces.
-3. Staging attachments in the composer (3b). The only item with a real design
+2. Staging attachments in the composer (3b). The only item with a real design
    decision in it — N events or the MSC4274 gallery flag.
-4. Room backgrounds (2) — self-contained, finishable in one sitting. The upload
+3. Room backgrounds (2) — self-contained, finishable in one sitting. The upload
    it needs already exists as `upload_media`, built for cover photos.
-5. Custom emoji and stickers (1) — the big one, in this order: pack storage →
+4. Custom emoji and stickers (1) — the big one, in this order: pack storage →
    picker → sending → reactions → import → autocomplete.

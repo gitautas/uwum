@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { call } from "../lib/call";
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
+import { invalidateProfile } from "../lib/profiles";
 import {
   ACCENT_SWATCHES,
   listMediaDevices,
@@ -450,7 +451,11 @@ function ProfileEditor() {
         ...(status !== (profile?.status ?? "") ? { status } : {}),
         ...(coverUrl !== (profile?.coverUrl ?? "") ? { coverUrl } : {}),
       });
-      setProfile(await ipc.getProfile());
+      const updated = await ipc.getProfile();
+      setProfile(updated);
+      // Your card and the top of your DMs read from the cache; without this
+      // they'd keep showing the old bio for the rest of the session.
+      invalidateProfile(updated.userId);
       setSaved(true);
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
