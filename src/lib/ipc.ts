@@ -92,10 +92,6 @@ export const createRoom = (room: NewRoom) =>
 export const joinRoom = (aliasOrId: string) =>
   invoke<string>("join_room", { aliasOrId });
 
-/** Leave a room. `forget` also drops it from the account entirely. */
-export const leaveRoom = (roomId: string, forget = false) =>
-  invoke<void>("leave_room", { roomId, forget });
-
 /** Rename a room or change its topic. Omitted fields are left alone. */
 export const updateRoom = (roomId: string, patch: { name?: string; topic?: string }) =>
   invoke<void>("update_room", {
