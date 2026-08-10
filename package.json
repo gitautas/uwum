@@ -26,6 +26,7 @@
     "livekit-client": "^2.9.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "unicode-emoji-json": "^0.9.0",
     "zustand": "^5.0.3"
   },
   "devDependencies": {

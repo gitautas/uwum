@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   accentFor,
@@ -14,10 +14,9 @@ import { useMediaBlob } from "../lib/blobMedia";
 import { renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo } from "../lib/types";
 import { useStore } from "../store";
+import { EmojiPicker } from "./EmojiPicker";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
 import { Icon, Spinner } from "./ui";
-
-const QUICK_REACTIONS = ["uwu", "♡", "^-^", ">_<", "nice", "oh no"];
 
 export function MessageRow({
   item,
@@ -36,9 +35,13 @@ export function MessageRow({
   onOpenThread: (rootEventId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  /** The rect the picker hangs off, or null when it's closed. */
+  const [pickerAnchor, setPickerAnchor] = useState<DOMRect | null>(null);
+  const pickerButton = useRef<HTMLButtonElement>(null);
   const setDraft = useStore((s) => s.setDraft);
   const showBanner = useStore((s) => s.showBanner);
+  const recentReactions = useStore((s) => s.settings.recentReactions);
+  const noteReactionUsed = useStore((s) => s.noteReactionUsed);
   const senderAnchor = useProfileAnchor(item.sender);
 
   const author = displayNameFor(item.sender, item.senderName);
@@ -48,7 +51,11 @@ export function MessageRow({
 
   async function react(key: string) {
     if (!item.eventId) return;
-    setPickerOpen(false);
+    setPickerAnchor(null);
+    // Remembered even if the send fails: picking it is the signal about what
+    // this person reaches for, and a failure is usually the network, not the
+    // choice.
+    noteReactionUsed(key);
     try {
       await ipc.toggleReaction(roomId, item.eventId, key, threadRoot);
     } catch (e) {
@@ -91,10 +98,7 @@ export function MessageRow({
   return (
     <div
       onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => {
-        setHovered(false);
-        setPickerOpen(false);
-      }}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: "relative",
         display: "flex",
@@ -334,13 +338,16 @@ export function MessageRow({
         </span>
       )}
 
-      {hovered && item.eventId && (
+      {/* The bar stays up while the picker is open, so the thing it's attached
+          to doesn't vanish from under it when the pointer leaves the row. */}
+      {(hovered || pickerAnchor) && item.eventId && (
         <div
           style={{
             position: "absolute",
             top: -12,
             right: 12,
             display: "flex",
+            alignItems: "center",
             gap: 2,
             padding: 3,
             borderRadius: 12,
@@ -350,10 +357,55 @@ export function MessageRow({
             zIndex: 2,
           }}
         >
+          {recentReactions.map((key) => (
+            <button
+              key={key}
+              onClick={() => void react(key)}
+              title={`react with ${key}`}
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 9,
+                fontSize: 15,
+                lineHeight: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                transition: "transform var(--dur-fast) var(--ease-bounce)",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(255,255,255,.08)";
+                e.currentTarget.style.transform = "scale(1.15)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+                e.currentTarget.style.transform = "";
+              }}
+            >
+              {key}
+            </button>
+          ))}
+
+          <span
+            aria-hidden
+            style={{
+              width: 1,
+              height: 16,
+              margin: "0 2px",
+              background: "var(--border-subtle)",
+            }}
+          />
+
           <ActionButton
+            ref={pickerButton}
             icon="smiley"
             title="react"
-            onClick={() => setPickerOpen((v) => !v)}
+            onClick={() =>
+              setPickerAnchor((open) =>
+                open ? null : (pickerButton.current?.getBoundingClientRect() ?? null),
+              )
+            }
           />
           {item.canReply && (
             <ActionButton
@@ -387,45 +439,12 @@ export function MessageRow({
         </div>
       )}
 
-      {pickerOpen && (
-        <div
-          style={{
-            position: "absolute",
-            top: 18,
-            right: 12,
-            display: "flex",
-            gap: 4,
-            padding: 6,
-            borderRadius: 14,
-            background: "var(--surface-card-raised)",
-            border: "1px solid var(--border-default)",
-            boxShadow: "var(--shadow-pop)",
-            zIndex: 3,
-          }}
-        >
-          {QUICK_REACTIONS.map((key) => (
-            <button
-              key={key}
-              onClick={() => void react(key)}
-              style={{
-                padding: "4px 9px",
-                borderRadius: 999,
-                cursor: "pointer",
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
-                color: "var(--text-secondary)",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(255,255,255,.07)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "transparent";
-              }}
-            >
-              {key}
-            </button>
-          ))}
-        </div>
+      {pickerAnchor && (
+        <EmojiPicker
+          anchor={pickerAnchor}
+          onPick={(key) => void react(key)}
+          onClose={() => setPickerAnchor(null)}
+        />
       )}
     </div>
   );
@@ -436,14 +455,18 @@ function ActionButton({
   title,
   onClick,
   danger,
+  ref,
 }: {
   icon: string;
   title: string;
   onClick: () => void;
   danger?: boolean;
+  /** Needed by the one button that anchors a popover to itself. */
+  ref?: React.Ref<HTMLButtonElement>;
 }) {
   return (
     <button
+      ref={ref}
       onClick={onClick}
       title={title}
       style={{

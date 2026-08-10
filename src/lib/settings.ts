@@ -3,6 +3,8 @@
  * account, so they live in `localStorage` and never touch the homeserver.
  */
 
+import type { SkinTone } from "./emoji";
+
 export type Accent = "acid" | "pink" | "violet" | "cyan";
 
 export interface Settings {
@@ -19,7 +21,20 @@ export interface Settings {
   sendOnEnter: boolean;
   /** Show the room info panel beside the timeline. */
   showInfoPanel: boolean;
+  /** Which skin tone the emoji picker offers. 0 is the default yellow. */
+  skinTone: SkinTone;
+  /**
+   * Reactions you've picked lately, most recent first.
+   *
+   * Kept here rather than on the account because it's a habit of this machine,
+   * and because writing account data on every reaction would be a lot of
+   * traffic for something nobody else can see.
+   */
+  recentReactions: string[];
 }
+
+/** How many recent reactions to remember — one row of the hover bar. */
+export const MAX_RECENT_REACTIONS = 6;
 
 export const DEFAULTS: Settings = {
   accent: "acid",
@@ -29,6 +44,10 @@ export const DEFAULTS: Settings = {
   livekitUrl: "",
   sendOnEnter: true,
   showInfoPanel: true,
+  skinTone: 0,
+  // A first-run row that isn't empty, in the house voice. These are replaced by
+  // real usage as soon as the user reacts to anything.
+  recentReactions: ["💜", "😹", "🥺", "✨", "👀", "🔥"],
 };
 
 const STORAGE_KEY = "uwum:settings";
