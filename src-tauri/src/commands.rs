@@ -219,6 +219,46 @@ pub async fn get_image_packs(
     packs::available(&*state.core().await?, room_id.as_deref()).await
 }
 
+/// Every pack on the account, including ones not turned on — what the settings
+/// screen lists.
+#[tauri::command]
+pub async fn get_all_image_packs(state: State<'_, AppState>) -> Result<Vec<packs::ImagePackDto>> {
+    packs::all(&*state.core().await?).await
+}
+
+/// Change one thing about one pack.
+#[tauri::command]
+pub async fn edit_image_pack(
+    state: State<'_, AppState>,
+    target: packs::PackTarget,
+    edit: packs::PackEdit,
+) -> Result<()> {
+    packs::edit(&*state.core().await?, target, edit).await
+}
+
+/// Carry a room's pack everywhere, or stop.
+#[tauri::command]
+pub async fn set_pack_everywhere(
+    state: State<'_, AppState>,
+    room_id: String,
+    state_key: String,
+    everywhere: bool,
+) -> Result<()> {
+    packs::set_everywhere(
+        &*state.core().await?,
+        &parse_room_id(&room_id)?,
+        &state_key,
+        everywhere,
+    )
+    .await
+}
+
+/// Rooms this account may create or edit packs in.
+#[tauri::command]
+pub async fn get_pack_rooms(state: State<'_, AppState>) -> Result<Vec<packs::PackRoomDto>> {
+    packs::editable_rooms(&*state.core().await?).await
+}
+
 // ---------------------------------------------------------------------------
 // timeline
 // ---------------------------------------------------------------------------

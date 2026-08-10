@@ -50,6 +50,10 @@ pub fn run() {
             commands::set_room_marked_unread,
             // image packs
             commands::get_image_packs,
+            commands::get_all_image_packs,
+            commands::edit_image_pack,
+            commands::set_pack_everywhere,
+            commands::get_pack_rooms,
             // timeline
             commands::open_timeline,
             commands::close_timeline,
