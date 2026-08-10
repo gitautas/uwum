@@ -50,12 +50,28 @@ export function stickersOf(packs: ImagePack[]): PackImage[] {
 /**
  * A reaction key that is exactly one shortcode, or null.
  *
- * Reactions are plain strings in Matrix, so reacting with a custom emote sends
- * `:blobcat:` and every client without the pack shows those characters.
+ * Some clients react with `:blobcat:` rather than with the image's address —
+ * we used to as well — so this is still read even though nothing writes it.
  */
 export function reactionShortcode(key: string): string | null {
   const match = /^:([^\s:]+):$/.exec(key.trim());
   return match ? match[1] : null;
+}
+
+/**
+ * The reaction key a pick should be sent as.
+ *
+ * A custom emote goes in as the image's own address, which is what FluffyChat
+ * and Cinny send: reactions aggregate on exact string equality, so matching
+ * them means one pile instead of two of one each. Read the other way round by
+ * `reactionImage`, which is why the two live together.
+ *
+ * Stickers aren't reactable — a reaction is a string — so they never reach
+ * here; a caller that asks anyway gets the sticker's address, which at least
+ * shows the right picture.
+ */
+export function reactionKeyFor(picked: Picked): string {
+  return picked.kind === "unicode" ? picked.emoji : picked.image.url;
 }
 
 /** A reaction that should be drawn as a picture rather than as text. */
@@ -72,9 +88,9 @@ export interface ReactionImage {
  * key is a bare string and the ecosystem never agreed on what to put in it:
  *
  * * `:blobcat:` — the shortcode, which needs the pack to mean anything, and
- *   reads as those characters everywhere else. It's what we send.
- * * `mxc://…` — the image's own address, which FluffyChat and others send.
- *   Nothing has to be looked up: the key *is* the picture.
+ *   reads as those characters everywhere else.
+ * * `mxc://…` — the image's own address, which FluffyChat and others send, and
+ *   so do we. Nothing has to be looked up: the key *is* the picture.
  *
  * Both are drawn as the image. An mxc key is named from the pack when we happen
  * to have that image, since `:blobcat:` is a better tooltip than a media ID,

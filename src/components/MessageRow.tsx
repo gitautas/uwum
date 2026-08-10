@@ -11,7 +11,7 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
-import { emoteLookup, reactionImage } from "../lib/packs";
+import { emoteLookup, reactionImage, reactionKeyFor } from "../lib/packs";
 import { renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
 import { useStore } from "../store";
@@ -446,14 +446,7 @@ export function MessageRow({
         <EmojiPicker
           anchor={pickerAnchor}
           packs={packs}
-          onPick={(picked) =>
-            // A reaction is a string, so a custom emote reacts as its
-            // shortcode. Everyone sees `:blobcat:`; anyone with the pack sees
-            // the picture.
-            void react(
-              picked.kind === "unicode" ? picked.emoji : `:${picked.image.shortcode}:`,
-            )
-          }
+          onPick={(picked) => void react(reactionKeyFor(picked))}
           onClose={() => setPickerAnchor(null)}
         />
       )}

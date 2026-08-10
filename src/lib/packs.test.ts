@@ -5,6 +5,7 @@ import {
   emoteRefs,
   matchEmotes,
   reactionImage,
+  reactionKeyFor,
   reactionShortcode,
   stickersOf,
   typingShortcode,
@@ -94,6 +95,28 @@ describe("reactionShortcode", () => {
     expect(reactionShortcode("👍")).toBeNull();
     expect(reactionShortcode("nice :blobcat:")).toBeNull();
     expect(reactionShortcode("::")).toBeNull();
+  });
+});
+
+describe("reactionKeyFor", () => {
+  it("sends a unicode pick as the character", () => {
+    expect(reactionKeyFor({ kind: "unicode", emoji: "👍" })).toBe("👍");
+  });
+
+  it("sends a custom emote as its address, the way other clients do", () => {
+    // Reactions aggregate on exact string equality, so this is what decides
+    // whether reacting with the same emote as a FluffyChat user makes one pile
+    // or two.
+    const key = reactionKeyFor({ kind: "emote", image: image("blobcat") });
+    expect(key).toBe("mxc://veil.gg/blobcat");
+  });
+
+  it("round-trips through reactionImage, so what we send is what we draw", () => {
+    const blobcat = image("blobcat");
+    const lookup = emoteLookup([pack("user", [blobcat])]);
+
+    const drawn = reactionImage(reactionKeyFor({ kind: "emote", image: blobcat }), lookup);
+    expect(drawn).toEqual({ url: blobcat.url, label: ":blobcat:" });
   });
 });
 
