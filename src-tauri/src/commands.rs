@@ -128,6 +128,12 @@ pub async fn join_room(state: State<'_, AppState>, alias_or_id: String) -> Resul
     rooms::join(&*state.core().await?, &alias_or_id).await
 }
 
+/// Leave a room. Doesn't forget it — see `rooms::leave`.
+#[tauri::command]
+pub async fn leave_room(state: State<'_, AppState>, room_id: String) -> Result<()> {
+    rooms::leave(&*state.core().await?, &parse_room_id(&room_id)?).await
+}
+
 /// Rename a room or change its topic. Omitted fields are left alone.
 #[tauri::command]
 pub async fn update_room(

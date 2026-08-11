@@ -4,7 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "../lib/ipc";
 import { emoteLookup, emoteRefs, matchEmotes, typingShortcode } from "../lib/packs";
-import type { PackImage } from "../lib/types";
+import type { EventItem, PackImage } from "../lib/types";
 import { uploadFiles, uploadPaths } from "../lib/upload";
 import { selectDraft, useStore } from "../store";
 import { EmojiPicker } from "./EmojiPicker";
@@ -106,6 +106,66 @@ export function Composer({
       setDraft(key, { body, replyTo: draft.replyTo, editing: draft.editing });
       showBanner("error", ipc.asUwuError(e).message);
     }
+  }
+
+  /**
+   * The newest message in this timeline matching `wanted`.
+   *
+   * The timeline is read at keypress rather than subscribed to: the composer
+   * has no other reason to re-render every time a message arrives, and this is
+   * only ever wanted at the moment the key goes down.
+   */
+  function findLast(wanted: (event: EventItem) => boolean): EventItem | null {
+    const items = useStore.getState().timelines[key] ?? [];
+
+    for (let i = items.length - 1; i >= 0; i--) {
+      const event = items[i].event;
+      if (event?.eventId && wanted(event)) return event;
+    }
+
+    return null;
+  }
+
+  /**
+   * Put the last message you can still edit back in the box.
+   *
+   * `isEditable` is the same flag the pencil on a message uses, so this can
+   * only ever pick something the server would actually accept an edit for.
+   */
+  function editLastOwnMessage(): boolean {
+    const event = findLast((e) => e.isEditable);
+    if (!event || !("body" in event.content)) return false;
+
+    setDraft(key, { editing: event.eventId, body: event.content.body, replyTo: null });
+
+    // The value is about to change under a caret sitting at 0, which would drop
+    // the cursor before the text rather than after it. Same growth the
+    // `onChange` handler does, for a message taller than one line.
+    requestAnimationFrame(() => {
+      const field = input.current;
+      if (!field) return;
+      field.focus();
+      field.selectionStart = field.selectionEnd = field.value.length;
+      field.style.height = "auto";
+      field.style.height = `${Math.min(field.scrollHeight, 160)}px`;
+    });
+
+    return true;
+  }
+
+  /**
+   * Start a reply to the last thing somebody else said.
+   *
+   * `canReply` is the SDK's own predicate and the one the reply button on a
+   * message uses. Nothing goes in the box — a reply is an empty composer
+   * pointed at an event, which is what the bar above it then announces.
+   */
+  function replyToLastOtherMessage(): boolean {
+    const event = findLast((e) => !e.isOwn && e.canReply);
+    if (!event) return false;
+
+    setDraft(key, { replyTo: event.eventId, editing: null });
+    return true;
   }
 
   /** Replace whatever is being typed at the caret with `text`. */
@@ -313,6 +373,30 @@ export function Composer({
               if (e.key === "Escape") {
                 e.preventDefault();
                 setCompleting(null);
+                return;
+              }
+            }
+
+            // On an empty composer the arrows reach into the timeline: Up puts
+            // your last message back in the box to edit, Down starts a reply to
+            // the last thing somebody else said. Only when it's empty — once
+            // there's text, the arrows are how you move around inside it.
+            const recalls =
+              !draft.body &&
+              !draft.editing &&
+              !e.shiftKey &&
+              !e.metaKey &&
+              !e.ctrlKey &&
+              !e.altKey;
+
+            if (recalls && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+              // Nothing to reach for: leave the key alone rather than
+              // swallowing it for no reason.
+              const took =
+                e.key === "ArrowUp" ? editLastOwnMessage() : replyToLastOtherMessage();
+
+              if (took) {
+                e.preventDefault();
                 return;
               }
             }

@@ -712,13 +712,37 @@ pub async fn join(core: &MatrixCore, alias_or_id: &str) -> Result<String> {
     Ok(room.room_id().to_string())
 }
 
-/// Leave a room, and optionally forget it.
+/// Leave a room. Deliberately *not* forget — see PLAN.md.
 ///
-/// Matrix has no delete. Forgetting drops the room from your account entirely —
-/// it stops being listed, and its history is no longer yours to read even if
-/// you're invited back. For a room only you were in, that is as close to
-/// deletion as the protocol gets; for any other room, everyone else's copy
-/// carries on without you. The UI says which of those is happening.
+/// Matrix has no delete, and the two halves behave very differently. Leaving
+/// tells the server you're out: the room turns `Left`, the sidebar filters it
+/// away, and nothing local is deleted. Forgetting additionally drops the room
+/// from the local store, which is where all four of the faults recorded in
+/// PLAN.md came from — including one that can't be fixed from this side, where
+/// a sync already in flight writes the room back and `restore_session` loads it
+/// again at startup. So this leaves, and stops.
+///
+/// The open timeline goes first. It subscribes to the room's event cache, and a
+/// stream still pulling on a room the server has stopped sending us is at best
+/// pointless — the same subscription is what turned forgetting into a panic.
+///
+/// One exception is not ours to make: `Room::leave` forgets the room *for us*
+/// when it was in the `Invited` state, because that's what declining an invite
+/// means to the SDK. An invite has no local history to lose, so it doesn't grow
+/// the ghost that PLAN.md describes, but it does mean "we never call forget" is
+/// true of this function and not of the invite path underneath it.
+///
+/// Calling this on a room already left is a no-op, not an error: `leave_impl`
+/// skips any room whose state is `Left` or `Banned` and reports success.
+pub async fn leave(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
+    let room = core.room(&room_id.to_owned())?;
+    tracing::debug!("leaving {room_id} (state {:?})", room.state());
+
+    super::timeline::close_all(core, room_id).await;
+    room.leave().await?;
+    Ok(())
+}
+
 pub async fn set_typing(core: &MatrixCore, room_id: &RoomId, typing: bool) -> Result<()> {
     core.room(&room_id.to_owned())?.typing_notice(typing).await?;
     Ok(())

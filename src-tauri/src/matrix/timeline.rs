@@ -140,6 +140,20 @@ pub async fn close(core: &MatrixCore, room_id: &RoomId, thread_root: Option<&str
     Ok(())
 }
 
+/// Close a room's timeline and every thread timeline inside it.
+///
+/// Thread timelines are keyed `<room>|<root>`, so the room's own key is the
+/// prefix of all of them. Used when the room itself is going away and there's
+/// nothing left for those streams to watch.
+pub async fn close_all(core: &MatrixCore, room_id: &RoomId) {
+    let prefix = format!("{room_id}|");
+    let own = room_id.as_str();
+    core.timelines
+        .lock()
+        .await
+        .retain(|key, _| key != own && !key.starts_with(&prefix));
+}
+
 
 async fn get(
     core: &MatrixCore,

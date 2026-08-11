@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
+import { getVersion } from "@tauri-apps/api/app";
 import { open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
@@ -1102,6 +1103,12 @@ function AppearanceSection() {
 // ---------------------------------------------------------------------------
 
 function AboutSection() {
+  const [version, setVersion] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setVersion, () => {});
+  }, []);
+
   return (
     <>
       <Heading>about</Heading>
@@ -1129,7 +1136,7 @@ function AboutSection() {
             lineHeight: 1.9,
           }}
         >
-          <div>version 0.1.0</div>
+          <div>version {version || "…"}</div>
           <div>matrix-rust-sdk 0.18 · e2ee via megolm</div>
           <div>voice over matrixrtc + livekit</div>
         </div>

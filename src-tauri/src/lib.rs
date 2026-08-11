@@ -41,6 +41,7 @@ pub fn run() {
             commands::get_members,
             commands::create_room,
             commands::join_room,
+            commands::leave_room,
             commands::update_room,
             commands::get_room_permissions,
             commands::invite_user,

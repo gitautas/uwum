@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "../lib/ipc";
 import type { RoomPermissions, RoomSummary } from "../lib/types";
@@ -15,7 +16,10 @@ import { Button, Modal } from "./ui";
  * disabled input you can't act on is just clutter. Permissions are read once
  * per room rather than carried on every room summary.
  *
- * There is deliberately no way to leave a room here; see PLAN.md.
+ * Leaving lives at the bottom, behind its own confirmation. It's deliberately
+ * two clicks down a dialog nobody opens by accident: leaving is not reversible
+ * from this side — an invite-only room you leave needs someone to invite you
+ * back — and it should never sit next to anything you'd click in a hurry.
  */
 export function RoomSettingsDialog({
   room,
@@ -51,7 +55,102 @@ export function RoomSettingsDialog({
           </div>
         )
       )}
+
+      <LeaveRoom room={room} onLeft={onClose} />
     </Modal>
+  );
+}
+
+/**
+ * The way out, kept quiet until it's asked for.
+ *
+ * Two steps rather than a `confirm()`: the first click is a plain link at the
+ * foot of the dialog, and only then does the room's name appear on a button
+ * that does the thing. Nothing is deleted — leaving a room drops it from your
+ * list and leaves everyone else's copy alone.
+ */
+function LeaveRoom({ room, onLeft }: { room: RoomSummary; onLeft: () => void }) {
+  const { selectRoom, showBanner } = useStore(
+    useShallow((s) => ({ selectRoom: s.selectRoom, showBanner: s.showBanner })),
+  );
+  const [asked, setAsked] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+
+  // An invite you haven't taken up is declined rather than left, and a dm is a
+  // person rather than a place. Same call underneath; different sentence.
+  const invited = room.membership === "invited";
+  const verb = invited ? "decline invite" : room.isDirect ? "leave this chat" : "leave room";
+
+  async function leave() {
+    if (leaving) return;
+    setLeaving(true);
+    try {
+      await ipc.leaveRoom(room.id);
+      // Close before deselecting: the room is about to vanish from the list
+      // underneath this dialog, and a modal anchored to a room that's gone is
+      // a stale thing to leave on screen.
+      onLeft();
+      await selectRoom(null);
+    } catch (e) {
+      showBanner("error", ipc.asUwuError(e).message);
+      setLeaving(false);
+      setAsked(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        marginTop: 20,
+        paddingTop: 14,
+        borderTop: "1px solid var(--border-subtle)",
+      }}
+    >
+      {asked ? (
+        <>
+          <div
+            style={{
+              fontSize: 12.5,
+              color: "var(--text-secondary)",
+              lineHeight: 1.55,
+              marginBottom: 10,
+            }}
+          >
+            {invited
+              ? `decline the invite to ${room.name}?`
+              : `leave ${room.name}? it drops off your list, and you'd need an invite to get back into a private room.`}
+          </div>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <Button size="sm" variant="ghost" onClick={() => setAsked(false)}>
+              stay
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              disabled={leaving}
+              onClick={() => void leave()}
+            >
+              {leaving ? "leaving…" : verb}
+            </Button>
+          </div>
+        </>
+      ) : (
+        <button
+          onClick={() => setAsked(true)}
+          style={{
+            cursor: "pointer",
+            background: "none",
+            border: "none",
+            padding: 0,
+            fontFamily: "var(--font-body)",
+            fontSize: 12.5,
+            color: "var(--status-danger)",
+          }}
+        >
+          {verb}…
+        </button>
+      )}
+    </div>
   );
 }
 

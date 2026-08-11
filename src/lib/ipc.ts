@@ -97,6 +97,12 @@ export const createRoom = (room: NewRoom) =>
 export const joinRoom = (aliasOrId: string) =>
   invoke<string>("join_room", { aliasOrId });
 
+/**
+ * Leave a room. It stops being listed, but nothing local is deleted — this
+ * isn't "forget", which PLAN.md explains at length is not safe to offer.
+ */
+export const leaveRoom = (roomId: string) => invoke<void>("leave_room", { roomId });
+
 /** Rename a room or change its topic. Omitted fields are left alone. */
 export const updateRoom = (roomId: string, patch: { name?: string; topic?: string }) =>
   invoke<void>("update_room", {

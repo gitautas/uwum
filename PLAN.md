@@ -299,11 +299,14 @@ What this cost, and is worth knowing before touching any of it again:
 Still missing here: editing a room's avatar, and inviting people from anywhere
 other than a room you're already in.
 
-### Leaving a room is deliberately not supported
+### Leaving is supported; forgetting is deliberately not
 
-It was built, and then removed. Don't rebuild it without reading this.
+Leaving was built, removed, and then restored — but only the safe half. The
+dialog behind the pencil leaves a room and stops there. It never calls
+`forget_room`, and shouldn't. Don't add that without reading this.
 
-Four separate faults came out of leaving, three of them fixed:
+Four separate faults came out of the original attempt, three of them fixed —
+all four belong to forgetting, not to leaving:
 
 - **`forget` refuses while the room still looks joined.** `leave` only sends the
   request; the state turns Left when sync brings it back — except `leave_impl`
@@ -328,9 +331,24 @@ so it went too. If this comes back, the honest fixes are upstream: `forget_room`
 needs to stop a room being re-admitted by a sync already in flight, or
 `RoomLoadSettings` needs to not resurrect it.
 
+**Known bug, accepted for now: leaving takes two goes.** The room stays in the
+sidebar after the first leave and only disappears on a second attempt. The
+second attempt cannot be what fixes it — `Room::leave` filters out any room
+whose state is already `Left` (`room/mod.rs:489`), sends nothing, and returns
+`Ok(())` — so the trigger is something else settling in the background, not the
+extra request. Pushing the summary from `leave_room` with `emit_room_refresh`,
+which is the fix for the identical-looking mute bug, was tried and did **not**
+help; it's been reverted rather than left in as a fix that isn't one. The
+`tracing::debug!` in `rooms::leave` reports the room's state on entry, which is
+the next thing to read when this is picked up.
+
 **Leaving without forgetting never produced a ghost** — a left room is filtered
-by `membership == "left"` and nothing gets deleted — so that is the version
-worth restoring first if this is picked up again.
+by `membership == "left"` and nothing gets deleted — which is why that is the
+version now shipping. `rooms::leave` closes the room's timelines first (an open
+timeline holds a subscription to the room's event cache, and a stream pulling on
+a room the server has stopped sending is at best pointless), then leaves. The UI
+puts it at the foot of the room settings dialog behind a confirmation, because
+getting back into a private room needs someone else to invite you.
 
 ---
 

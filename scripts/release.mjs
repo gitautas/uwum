@@ -92,6 +92,18 @@ cargo = cargo.replace(
 
 fs.writeFileSync(cargoPath, cargo);
 
+// Cargo.lock records the workspace member's own version, so it needs the bump
+// too — otherwise the next cargo run dirties the tree right after a release,
+// and the tagged tree has a lockfile that disagrees with Cargo.toml.
+// --workspace re-resolves only the members, leaving dependency versions alone.
+run("cargo", [
+  "update",
+  "--workspace",
+  "--offline",
+  "--manifest-path",
+  cargoPath,
+]);
+
 // Update package.json
 const packagePath = "package.json";
 const pkg = JSON.parse(fs.readFileSync(packagePath, "utf8"));
@@ -109,7 +121,7 @@ if (fs.existsSync("package-lock.json")) {
 }
 
 // Make sure everything is clean before committing
-run("git", ["add", "package.json", "src-tauri/Cargo.toml"]);
+run("git", ["add", "package.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]);
 
 if (fs.existsSync("package-lock.json")) {
   run("git", ["add", "package-lock.json"]);
