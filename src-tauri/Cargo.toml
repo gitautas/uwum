@@ -1,6 +1,6 @@
 [package]
 name = "uwum"
-version = "0.1.3"
+version = "0.2.0"
 description = "a cute matrix client"
 authors = ["uwum"]
 edition = "2024"
