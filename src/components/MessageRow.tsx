@@ -11,6 +11,7 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
+import { saveAttachment } from "../lib/download";
 import { imageLookup, reactionImage, reactionKeyFor } from "../lib/packs";
 import { linkify, renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
@@ -843,8 +844,25 @@ function AudioBody({ body, media }: { body: string; media: MediaInfo }) {
 }
 
 function FileBody({ body, media }: { body: string; media: MediaInfo }) {
+  const [saving, setSaving] = useState(false);
+  const mxc = media.mxc;
+
+  async function download() {
+    if (!mxc || saving) return;
+    setSaving(true);
+    try {
+      await saveAttachment(mxc, body);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div
+    <button
+      type="button"
+      onClick={() => void download()}
+      disabled={!mxc}
+      title={mxc ? `save ${body}` : body}
       style={{
         marginTop: 4,
         display: "inline-flex",
@@ -855,9 +873,21 @@ function FileBody({ body, media }: { body: string; media: MediaInfo }) {
         background: "var(--surface-card)",
         border: "1px solid var(--border-subtle)",
         maxWidth: 360,
+        textAlign: "left",
+        cursor: mxc ? "pointer" : "default",
+      }}
+      onMouseEnter={(e) => {
+        if (mxc) e.currentTarget.style.background = "var(--surface-card-raised)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--surface-card)";
       }}
     >
-      <Icon name="file-arrow-down" size={18} color="var(--accent-quaternary)" />
+      {saving ? (
+        <Spinner size={16} />
+      ) : (
+        <Icon name="file-arrow-down" size={18} color="var(--accent-quaternary)" />
+      )}
       <div style={{ minWidth: 0 }}>
         <div
           className="uwu-ellipsis"
@@ -875,7 +905,7 @@ function FileBody({ body, media }: { body: string; media: MediaInfo }) {
           {formatBytes(media.size)}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 

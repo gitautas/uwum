@@ -1,8 +1,7 @@
-import { save } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
-import * as ipc from "../lib/ipc";
+import { saveAttachment } from "../lib/download";
 import { mediaUrl } from "../lib/ipc";
 import { useStore } from "../store";
 import { Icon, Spinner } from "./ui";
@@ -43,13 +42,7 @@ function Frame({ mxc, name }: { mxc: string; name: string }) {
   async function download() {
     setSaving(true);
     try {
-      const destination = await save({ defaultPath: name });
-      if (destination) {
-        await ipc.saveMedia(mxc, destination);
-        showBanner("info", "saved~");
-      }
-    } catch (e) {
-      showBanner("error", ipc.asUwuError(e).message);
+      await saveAttachment(mxc, name);
     } finally {
       setSaving(false);
     }
