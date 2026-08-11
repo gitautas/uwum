@@ -100,6 +100,8 @@ pub fn run() {
         ])
         .setup(|app| {
             install_settings_menu_item(app.handle())?;
+            #[cfg(target_os = "linux")]
+            enable_webrtc(app)?;
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -188,6 +190,68 @@ fn install_settings_menu_item(app: &tauri::AppHandle) -> tauri::Result<()> {
     });
 
     Ok(())
+}
+
+/// Turn on WebRTC in the WebView on Linux.
+///
+/// WKWebView and WebView2 arrive with a working WebRTC stack; WebKitGTK does
+/// not. Two things are missing and both default to off:
+///
+/// 1. `enable-webrtc` (and the `enable-media-stream` it implies) are `FALSE` in
+///    a fresh `WebKitSettings`, and wry sets neither — it configures WebGL and
+///    WebAudio and stops there. Without them `RTCPeerConnection` and
+///    `navigator.mediaDevices` simply aren't on `window`.
+/// 2. WebKitGTK asks the embedder for permission before handing over a camera
+///    or microphone, via `permission-request`. wry never connects that signal,
+///    so the request goes unanswered and WebKit denies it — `getUserMedia`
+///    rejects even with the settings above.
+///
+/// We grant unconditionally. The only thing this WebView ever loads is our own
+/// frontend over wry's custom scheme, so there is no third-party origin that
+/// could be asking; a prompt here would be a prompt we'd have to answer "yes"
+/// to on the user's behalf anyway. It leaves us level with macOS and Windows,
+/// where the OS itself owns the camera and microphone prompt.
+///
+/// `DeviceInfoPermissionRequest` is granted for the same reason: without it
+/// `enumerateDevices()` still resolves, but every device comes back with an
+/// empty label, so the device picker in call settings shows a list of blanks.
+///
+/// None of this helps if the distribution compiled WebKitGTK without
+/// `-DENABLE_WEB_RTC=ON`, or if `webrtcbin` (gst-plugins-bad) is missing at
+/// runtime — hence the package dependencies in `tauri.conf.json`.
+#[cfg(target_os = "linux")]
+fn enable_webrtc(app: &tauri::App) -> tauri::Result<()> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+
+    window.with_webview(|platform| {
+        use webkit2gtk::{
+            DeviceInfoPermissionRequest, PermissionRequestExt, SettingsExt,
+            UserMediaPermissionRequest, WebViewExt, glib::prelude::Cast,
+        };
+
+        let webview = platform.inner();
+
+        if let Some(settings) = WebViewExt::settings(&webview) {
+            // `enable-webrtc` implies `enable-media-stream`, but say both: the
+            // implication is documented behaviour we'd rather not lean on, and
+            // media-stream is the one that puts `mediaDevices` on `navigator`.
+            settings.set_enable_media_stream(true);
+            settings.set_enable_webrtc(true);
+        }
+
+        webview.connect_permission_request(|_, request| {
+            let ours = request.downcast_ref::<UserMediaPermissionRequest>().is_some()
+                || request.downcast_ref::<DeviceInfoPermissionRequest>().is_some();
+            if ours {
+                request.allow();
+            }
+            // `true` means handled — returning it for requests we didn't allow
+            // would silently swallow them.
+            ours
+        });
+    })
 }
 
 /// Serve `uwum://media/<encoded-mxc>?w=&h=` from the Matrix media repository.

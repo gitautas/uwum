@@ -411,19 +411,18 @@ export const useStore = create<State & Actions>((set, get) => ({
     set({ verificationRequest, sasState: null }),
 
   applyVerificationUpdate: (update) =>
-    set((s) => {
+    set(() => {
       if (isSasUpdate(update)) {
-        const finished = update.state === "done" || update.state === "cancelled";
-        return {
-          sasState: update,
-          // Keep the modal up on completion so the user sees the outcome; the
-          // modal itself dismisses on acknowledgement.
-          verificationRequest: finished ? s.verificationRequest : s.verificationRequest,
-        };
+        // Only the SAS half moves. The request is deliberately left alone so
+        // the modal stays up on completion and the user sees the outcome; it
+        // dismisses on acknowledgement.
+        return { sasState: update };
       }
-      if (update.state === "done" || update.state === "cancelled") {
-        return { verificationRequest: null, sasState: null };
-      }
+      // Not `verificationRequest: null` on a finished request. Dropping it
+      // closes the modal the instant the flow ends, which meant a verification
+      // that failed just made the dialog vanish — no reason, nothing to read —
+      // while the other client sat there saying "verification failed". Keep it
+      // up and let the user close it once they've seen the outcome.
       return { verificationRequest: update };
     }),
 

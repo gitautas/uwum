@@ -60,6 +60,14 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2"
 
+# Reaching into the WebView to switch WebRTC on (see `enable_webrtc` in lib.rs).
+# The version is pinned to the exact one wry depends on — `with_webview` hands
+# back wry's own `webkit2gtk::WebView`, and two different semver-compatible
+# copies of the crate would be two unrelated types. `v2_38` is what gates
+# `set_enable_webrtc`.
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+
 [features]
 # Enabled by the Tauri CLI for production builds. DO NOT REMOVE.
 custom-protocol = ["tauri/custom-protocol"]

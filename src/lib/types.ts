@@ -293,6 +293,8 @@ export interface VerificationRequestInfo {
   isSelfVerification: boolean;
   weStarted: boolean;
   state: "created" | "requested" | "ready" | "transitioned" | "done" | "cancelled";
+  /** Set when the flow was cancelled before SAS ever started. */
+  cancelReason: string | null;
 }
 
 export interface SasEmoji {

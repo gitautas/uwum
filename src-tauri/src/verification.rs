@@ -16,10 +16,10 @@ use matrix_sdk::{
     },
     ruma::{
         UserId,
-        events::{
-            key::verification::request::ToDeviceKeyVerificationRequestEvent,
-            room::message::{MessageType, OriginalSyncRoomMessageEvent},
+        events::key::verification::{
+            VerificationMethod, request::ToDeviceKeyVerificationRequestEvent,
         },
+        events::room::message::{MessageType, OriginalSyncRoomMessageEvent},
     },
 };
 use matrix_sdk_ui::timeline::EncryptedMessage;
@@ -32,6 +32,11 @@ use crate::{
     matrix::MatrixCore,
 };
 
+/// The verification methods this app can actually carry out. Emoji SAS is the
+/// only one the UI implements; advertising anything else invites the other
+/// client to pick a flow that dead-ends here.
+const SAS_ONLY: &[VerificationMethod] = &[VerificationMethod::SasV1];
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationRequestDto {
@@ -42,6 +47,9 @@ pub struct VerificationRequestDto {
     pub we_started: bool,
     /// `requested` | `ready` | `transitioned` | `done` | `cancelled`
     pub state: String,
+    /// Why the flow ended, when it ended badly and before SAS ever started —
+    /// otherwise there is nothing to show the user but "it stopped".
+    pub cancel_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,6 +91,14 @@ fn to_dto(request: &VerificationRequest) -> VerificationRequestDto {
         is_self_verification: request.is_self_verification(),
         we_started: request.we_started(),
         state: request_state_name(&request.state()).to_owned(),
+        cancel_reason: request_cancel_reason(&request.state()),
+    }
+}
+
+fn request_cancel_reason(state: &VerificationRequestState) -> Option<String> {
+    match state {
+        VerificationRequestState::Cancelled(info) => Some(info.reason().to_owned()),
+        _ => None,
     }
 }
 
@@ -154,6 +170,7 @@ async fn announce(app: AppHandle, core: Arc<MatrixCore>, request: VerificationRe
                     is_self_verification: request.is_self_verification(),
                     we_started: request.we_started(),
                     state: request_state_name(&state).to_owned(),
+                    cancel_reason: request_cancel_reason(&state),
                 },
             );
 
@@ -276,6 +293,25 @@ fn watch_sas(app: AppHandle, sas: SasVerification, flow_id: String) {
     tokio::spawn(async move {
         let mut changes = sas.changes();
         while let Some(state) = changes.next().await {
+            // `Started` means *they* sent the `m.key.verification.start` and we
+            // are the side that has to answer with an `m.key.verification.accept`
+            // before either device will send a key. Nothing in the SDK does this
+            // for us, so a SAS left in this state simply stalls: no emoji ever
+            // arrive, we go silent, and the other client eventually gives up
+            // with "verification failed".
+            //
+            // We reach this state more often than it looks. Even when we started
+            // SAS ourselves, the other side usually starts one too, and the spec
+            // tie-break discards whichever start came from the lexicographically
+            // larger device ID — so on roughly half of all verifications *our*
+            // start is the one thrown away and theirs is the one we must accept.
+            // That is why this failed for some people and not others.
+            if matches!(state, SasState::Started { .. })
+                && let Err(e) = sas.accept().await
+            {
+                tracing::error!("couldn't accept SAS verification {flow_id}: {e}");
+            }
+
             emit(&app, EV_VERIFICATION_UPDATE, sas_dto(&sas, &flow_id, &state));
             if matches!(state, SasState::Done { .. } | SasState::Cancelled(_)) {
                 break;
@@ -327,7 +363,7 @@ pub async fn request(
                 .map_err(|e| Error::Other(e.to_string()))?
                 .ok_or_else(|| Error::Other("we don't have that user's keys yet".into()))?;
             identity
-                .request_verification()
+                .request_verification_with_methods(SAS_ONLY.to_vec())
                 .await
                 .map_err(|e| Error::Other(format!("couldn't start verification: {e}")))?
         }
@@ -339,7 +375,7 @@ pub async fn request(
                 .map_err(|e| Error::Other(e.to_string()))?
                 .ok_or_else(|| Error::Other("no local device found".into()))?;
             device
-                .request_verification()
+                .request_verification_with_methods(SAS_ONLY.to_vec())
                 .await
                 .map_err(|e| Error::Other(format!("couldn't start verification: {e}")))?
         }
@@ -351,9 +387,15 @@ pub async fn request(
 
 pub async fn accept(core: &MatrixCore, user_id: &str, flow_id: &str) -> Result<()> {
     let request = find_request(core, user_id, flow_id).await?;
-    request.accept().await?;
+    // Advertise emoji only. `accept()` would also claim `m.qr_code.show.v1` and
+    // `m.reciprocate.v1` — the SDK's defaults, because the `qrcode` feature is
+    // on for the crypto crate — and the other client believes us: Element then
+    // leads with "scan the code on your other device" for a code this app never
+    // draws, and the user is stuck in a flow that cannot finish.
+    request.accept_with_methods(SAS_ONLY.to_vec()).await?;
     // Emoji SAS is the only method the UI implements, so drive it directly
-    // rather than waiting for the other side to choose.
+    // rather than waiting for the other side to choose. If they start one too,
+    // the spec's tie-break picks a winner and `watch_sas` accepts theirs.
     request.start_sas().await?;
     Ok(())
 }
@@ -451,7 +493,7 @@ pub async fn verify_device(app: &AppHandle, core: &Arc<MatrixCore>, device_id: &
         .ok_or_else(|| Error::Other("that device is no longer signed in".into()))?;
 
     let request = device
-        .request_verification()
+        .request_verification_with_methods(SAS_ONLY.to_vec())
         .await
         .map_err(|e| Error::Other(format!("couldn't start verification: {e}")))?;
 

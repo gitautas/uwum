@@ -36,7 +36,10 @@ export function VerificationModal() {
   }
 
   const emoji = sas?.emoji ?? null;
-  const done = sas?.state === "done";
+  // Either half can be the one that reports the outcome: the SAS finishes
+  // first, but a flow can also be cancelled before SAS ever starts, in which
+  // case the request is all we have to go on.
+  const done = sas?.state === "done" || request.state === "done";
   const cancelled = sas?.state === "cancelled" || request.state === "cancelled";
   const waiting = sas?.state === "confirmed";
 
@@ -122,6 +125,7 @@ export function VerificationModal() {
               title="not verified"
               body={
                 sas?.cancelReason ??
+                request.cancelReason ??
                 "the verification was cancelled. nothing has changed — you can try again."
               }
             />
