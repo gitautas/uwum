@@ -91,7 +91,9 @@ export function Link({ href, children }: { href: string; children: ReactNode }) 
           // Outside Tauri (tests, a browser preview) there's nothing to ask.
         }
       }}
-      style={{ textDecoration: "underline", cursor: "pointer" }}
+      // A URL is one unbroken word as far as the layout is concerned, and a
+      // long one would otherwise push the whole message row sideways.
+      style={{ textDecoration: "underline", cursor: "pointer", overflowWrap: "anywhere" }}
     >
       {children}
     </a>

@@ -9,7 +9,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const openUrl = vi.fn(() => Promise.resolve());
+const openUrl = vi.fn((_url: string) => Promise.resolve());
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: (url: string) => openUrl(url) }));
 
 const { linkify, renderFormattedBody } = await import("./richText");
