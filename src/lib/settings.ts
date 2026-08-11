@@ -23,6 +23,22 @@ export interface Settings {
   showInfoPanel: boolean;
   /** Which skin tone the emoji picker offers. 0 is the default yellow. */
   skinTone: SkinTone;
+  /** Show a desktop notification when a message arrives you'd be pinged for. */
+  notifyMessages: boolean;
+  /** Show a desktop notification when a call starts in a room you're in. */
+  notifyCalls: boolean;
+  /**
+   * Notify even while you're looking at the app.
+   *
+   * Off by default: a banner for the room you're already reading is noise.
+   */
+  notifyWhenFocused: boolean;
+  /** Id from `sounds.MESSAGE_SOUNDS`, or `"none"`. */
+  messageSound: string;
+  /** Id from `sounds.CALL_SOUNDS`, or `"none"`. */
+  callSound: string;
+  /** How loud the notification sounds are, 0 to 1. */
+  notificationVolume: number;
   /**
    * Reactions you've picked lately, most recent first.
    *
@@ -45,6 +61,12 @@ export const DEFAULTS: Settings = {
   sendOnEnter: true,
   showInfoPanel: true,
   skinTone: 0,
+  notifyMessages: true,
+  notifyCalls: true,
+  notifyWhenFocused: false,
+  messageSound: "blip",
+  callSound: "ring",
+  notificationVolume: 0.7,
   // A first-run row that isn't empty, in the house voice. These are replaced by
   // real usage as soon as the user reacts to anything.
   recentReactions: ["💜", "😹", "🥺", "✨", "👀", "🔥"],

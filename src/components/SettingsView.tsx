@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { open } from "@tauri-apps/plugin-dialog";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 import { call } from "../lib/call";
 import * as ipc from "../lib/ipc";
@@ -13,18 +14,34 @@ import {
   type Accent,
   type AudioDevice,
 } from "../lib/settings";
+import {
+  CALL_SOUNDS,
+  MESSAGE_SOUNDS,
+  NONE,
+  playCallSound,
+  playMessageSound,
+  type Sound,
+} from "../lib/sounds";
 import type { DeviceInfo, Profile, RecoveryStatus } from "../lib/types";
 import { useStore } from "../store";
 import { PacksSection } from "./PackSettings";
 import { Card, Field, Heading, inputStyle, Row } from "./settingsUi";
 import { Avatar, Button, Icon, RaveLabel, Spinner, Toggle } from "./ui";
 
-type Section = "account" | "security" | "voice" | "packs" | "appearance" | "about";
+type Section =
+  | "account"
+  | "security"
+  | "voice"
+  | "notifications"
+  | "packs"
+  | "appearance"
+  | "about";
 
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: "account", label: "account", icon: "user-circle" },
   { id: "security", label: "security", icon: "shield-check" },
   { id: "voice", label: "voice & video", icon: "microphone" },
+  { id: "notifications", label: "notifications", icon: "bell" },
   { id: "packs", label: "emotes & stickers", icon: "sticker" },
   { id: "appearance", label: "appearance", icon: "palette" },
   { id: "about", label: "about", icon: "info" },
@@ -124,6 +141,7 @@ export function SettingsView() {
           {section === "account" && <AccountSection />}
           {section === "security" && <SecuritySection />}
           {section === "voice" && <VoiceSection />}
+          {section === "notifications" && <NotificationsSection />}
           {section === "packs" && <PacksSection />}
           {section === "appearance" && <AppearanceSection />}
           {section === "about" && <AboutSection />}
@@ -840,6 +858,180 @@ function VoiceSection() {
         </Field>
       </Card>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// notifications
+// ---------------------------------------------------------------------------
+
+function NotificationsSection() {
+  const { settings, updateSettings } = useStore(
+    useShallow((s) => ({ settings: s.settings, updateSettings: s.updateSettings })),
+  );
+
+  // `null` while we're still asking the platform.
+  const [permitted, setPermitted] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    isPermissionGranted()
+      .then((granted) => {
+        if (!cancelled) setPermitted(granted);
+      })
+      .catch(() => {
+        if (!cancelled) setPermitted(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function askPermission() {
+    try {
+      setPermitted((await requestPermission()) === "granted");
+    } catch {
+      setPermitted(false);
+    }
+  }
+
+  return (
+    <>
+      <Heading>notifications</Heading>
+
+      {permitted === false && (
+        <Card tone="warning">
+          <div style={{ fontSize: 13, color: "var(--text-secondary)", lineHeight: 1.6 }}>
+            your system isn't letting uwum show banners yet. sounds still work — but
+            for pop-ups, allow notifications for uwum in system settings.
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Button variant="ghost" size="sm" onClick={askPermission}>
+              ask again
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      <Card>
+        <Row
+          icon="chat-circle-dots"
+          title="messages"
+          subtitle="uses your account's push rules, so muted rooms stay quiet"
+        >
+          <Toggle
+            on={settings.notifyMessages}
+            onToggle={(next) => updateSettings({ notifyMessages: next })}
+          />
+        </Row>
+        <Row icon="phone-call" title="calls" subtitle="when a call starts in one of your rooms">
+          <Toggle
+            on={settings.notifyCalls}
+            onToggle={(next) => updateSettings({ notifyCalls: next })}
+          />
+        </Row>
+        <Row
+          icon="eye"
+          title="notify while i'm here"
+          subtitle="off: no banner for the room you're already reading"
+        >
+          <Toggle
+            on={settings.notifyWhenFocused}
+            onToggle={(next) => updateSettings({ notifyWhenFocused: next })}
+          />
+        </Row>
+      </Card>
+
+      <Heading>sounds</Heading>
+      <Card>
+        <SoundPicker
+          label="message sound"
+          hint="played when a message arrives you'd be pinged for."
+          sounds={MESSAGE_SOUNDS}
+          value={settings.messageSound}
+          onChange={(messageSound) => updateSettings({ messageSound })}
+          preview={(id) => playMessageSound(id, settings.notificationVolume)}
+        />
+
+        <SoundPicker
+          label="call sound"
+          hint="played when someone starts a call."
+          sounds={CALL_SOUNDS}
+          value={settings.callSound}
+          onChange={(callSound) => updateSettings({ callSound })}
+          preview={(id) => playCallSound(id, settings.notificationVolume)}
+        />
+
+        <Field
+          label={`volume — ${Math.round(settings.notificationVolume * 100)}%`}
+          hint="how loud the two sounds above are. doesn't touch call audio."
+        >
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={Math.round(settings.notificationVolume * 100)}
+            onChange={(e) =>
+              updateSettings({ notificationVolume: Number(e.target.value) / 100 })
+            }
+            // Release rather than every frame: dragging the slider shouldn't
+            // fire a chirp per pixel.
+            onPointerUp={() =>
+              playMessageSound(settings.messageSound, settings.notificationVolume)
+            }
+            style={{ width: "100%", accentColor: "var(--accent-primary)" }}
+          />
+        </Field>
+      </Card>
+    </>
+  );
+}
+
+/** A sound chosen from the built-in set, with a button to hear it first. */
+function SoundPicker({
+  label,
+  hint,
+  sounds,
+  value,
+  onChange,
+  preview,
+}: {
+  label: string;
+  hint: string;
+  sounds: Sound[];
+  value: string;
+  onChange: (id: string) => void;
+  preview: (id: string) => void;
+}) {
+  return (
+    <Field label={label} hint={hint}>
+      <div style={{ display: "flex", gap: 10 }}>
+        <select
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value);
+            // Picking a sound is the moment you want to hear it.
+            preview(e.target.value);
+          }}
+          style={{ ...inputStyle, flex: 1 }}
+        >
+          {sounds.map((sound) => (
+            <option key={sound.id} value={sound.id}>
+              {sound.label}
+            </option>
+          ))}
+          <option value={NONE}>silent</option>
+        </select>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={value === NONE}
+          onClick={() => preview(value)}
+        >
+          play
+        </Button>
+      </div>
+    </Field>
   );
 }
 

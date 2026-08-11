@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "./lib/ipc";
+import { startNotifications } from "./lib/notify";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
@@ -112,6 +113,7 @@ function Shell() {
 
   useBackendEvents();
   useAppShortcuts();
+  useNotifications();
 
   return (
     <div
@@ -260,6 +262,15 @@ function useAppShortcuts() {
       void menu.then((unlisten) => unlisten()).catch(() => {});
     };
   }, []);
+}
+
+/**
+ * Watch the room list for things worth a banner, for as long as we're signed
+ * in. Mounted with the shell rather than the app so signing out tears the
+ * watcher down with it.
+ */
+function useNotifications() {
+  useEffect(() => startNotifications(), []);
 }
 
 /** Subscribe to everything Rust pushes, for as long as the shell is mounted. */
