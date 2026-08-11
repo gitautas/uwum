@@ -6637,7 +6637,7 @@ dependencies = [
 
 [[package]]
 name = "uwum"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "futures-util",
