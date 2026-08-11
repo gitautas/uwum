@@ -8,6 +8,7 @@ use std::{
 use matrix_sdk::{
     Client,
     authentication::matrix::MatrixSession,
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
     ruma::{RoomId, api::client::session::get_login_types::v3::LoginType},
     store::RoomLoadSettings,
 };
@@ -38,6 +39,34 @@ async fn probe_client(server: &str) -> Result<Client> {
 
 fn user_agent() -> String {
     format!("uwum/{}", env!("CARGO_PKG_VERSION"))
+}
+
+/// How the SDK is allowed to move room keys around on our behalf.
+///
+/// The defaults are all "do nothing", which is wrong for a chat client: with
+/// `BackupDownloadStrategy::Manual` a freshly verified device never fetches the
+/// keys for messages sent before it existed, so the history stays a wall of
+/// "can't decrypt" no matter how the verification went.
+///
+/// `AfterDecryptionFailure` is the strategy Element X uses — a message we can't
+/// read triggers a download of exactly that Megolm session, so history decrypts
+/// as it is read rather than in one enormous burst at startup.
+///
+/// `auto_enable_backups` is the other half of the same problem. Without a backup
+/// on the server there is nothing for a new device to download in the first
+/// place, and the first anyone hears of it is the day they sign in somewhere
+/// else. Creating the backup is safe on its own: the keys are encrypted with a
+/// recovery key that never leaves the client, and the settings pane is still
+/// where that key is shown to the user.
+///
+/// Cross-signing is *not* auto-bootstrapped: it needs interactive auth, which
+/// means a password prompt we'd have to raise out of a background task.
+fn encryption_settings() -> EncryptionSettings {
+    EncryptionSettings {
+        auto_enable_cross_signing: false,
+        backup_download_strategy: BackupDownloadStrategy::AfterDecryptionFailure,
+        auto_enable_backups: true,
+    }
 }
 
 /// Ask a homeserver what it is and how one signs in to it.
@@ -205,6 +234,7 @@ async fn finish_login(
         .homeserver_url(homeserver)
         .sqlite_store(&store_path, Some(&passphrase))
         .user_agent(user_agent())
+        .with_encryption_settings(encryption_settings())
         .handle_refresh_tokens()
         .build()
         .await?;
@@ -239,6 +269,7 @@ pub async fn restore(
         .homeserver_url(&restored.pointer.homeserver)
         .sqlite_store(&restored.store_path, Some(&restored.store_passphrase))
         .user_agent(user_agent())
+        .with_encryption_settings(encryption_settings())
         .handle_refresh_tokens()
         .build()
         .await?;

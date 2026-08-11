@@ -1,11 +1,12 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { formatDayDivider, joinNames, localpart } from "../lib/display";
+import { cachedProfile, loadProfile } from "../lib/profiles";
 import type { TimelineItem, TypingUser } from "../lib/types";
 import { useStore } from "../store";
 import { MessageRow } from "./MessageRow";
-import { Spinner } from "./ui";
+import { Avatar, Spinner } from "./ui";
 
 /**
  * Shared empties for rooms we haven't loaded yet.
@@ -296,10 +297,28 @@ export function TimelineView({
   );
 }
 
-/** The little facepile under the last message. */
-function ReadReceipts({ items }: { items: TimelineItem[] }) {
+/** How many faces the pile shows before it's just a number. */
+const MAX_FACES = 5;
+
+/** The little facepile under the last message. Exported for its test. */
+export function ReadReceipts({ items }: { items: TimelineItem[] }) {
   const lastEvent = [...items].reverse().find((i) => i.kind === "event")?.event;
   const receipts = lastEvent?.readReceipts ?? [];
+
+  // Anyone who has spoken in view already carries their picture on their
+  // messages, so their face costs nothing. Built for the whole timeline rather
+  // than per-receipt so five readers make one pass, not five.
+  const seen = useMemo(() => {
+    const known = new Map<string, { name: string | null; avatar: string | null }>();
+    for (const item of items) {
+      const event = item.event;
+      if (event && !known.has(event.sender)) {
+        known.set(event.sender, { name: event.senderName, avatar: event.senderAvatar });
+      }
+    }
+    return known;
+  }, [items]);
+
   if (receipts.length === 0) return null;
 
   return (
@@ -311,28 +330,8 @@ function ReadReceipts({ items }: { items: TimelineItem[] }) {
         padding: "4px 8px 10px 60px",
       }}
     >
-      {receipts.slice(0, 5).map((userId) => (
-        <div
-          key={userId}
-          title={localpart(userId)}
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: "50%",
-            border: "1.5px solid var(--ink-950)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 8,
-            fontWeight: 800,
-            fontFamily: "var(--font-display)",
-            color: "var(--text-on-accent)",
-            marginLeft: -6,
-            background: `var(--accent-${["primary", "secondary", "tertiary", "quaternary"][userId.length % 4]})`,
-          }}
-        >
-          {localpart(userId).slice(0, 2)}
-        </div>
+      {receipts.slice(0, MAX_FACES).map((userId) => (
+        <ReceiptFace key={userId} userId={userId} known={seen.get(userId)} />
       ))}
       <span
         style={{
@@ -345,6 +344,56 @@ function ReadReceipts({ items }: { items: TimelineItem[] }) {
         seen by {receipts.length}
       </span>
     </div>
+  );
+}
+
+/**
+ * One face in the pile.
+ *
+ * A read receipt is a bare user ID — the timeline carries nothing else about
+ * the reader — which is why this used to draw a coloured monogram and nothing
+ * more. Whoever is on screen supplies most of them for free; the rest come from
+ * the profile cache, which is one request per person per five minutes and
+ * usually zero, since these are the same few people over and over.
+ */
+function ReceiptFace({
+  userId,
+  known,
+}: {
+  userId: string;
+  known?: { name: string | null; avatar: string | null };
+}) {
+  const [fetched, setFetched] = useState(() => cachedProfile(userId));
+
+  useEffect(() => {
+    // Nothing to look up for someone whose message is right there.
+    if (known?.avatar) return;
+
+    let live = true;
+    // A profile that won't load leaves the monogram in place, which is what
+    // this drew before and is a perfectly good answer.
+    loadProfile(userId)
+      .then((profile) => live && setFetched(profile))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [userId, known?.avatar]);
+
+  const name = known?.name ?? fetched?.displayName ?? localpart(userId);
+
+  return (
+    <span title={name} style={{ display: "flex", marginLeft: -6 }}>
+      <Avatar
+        id={userId}
+        name={name}
+        mxc={known?.avatar ?? fetched?.avatarUrl}
+        size={18}
+        radius={9}
+        fontSize={8}
+        style={{ borderWidth: 1.5 }}
+      />
+    </span>
   );
 }
 

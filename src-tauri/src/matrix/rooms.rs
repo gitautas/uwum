@@ -38,15 +38,35 @@ fn membership_state_str(state: &MembershipState) -> &'static str {
     }
 }
 
-/// Whether a room exists to hold data rather than a conversation.
+/// The room types that mean "a call you join", not "a room you read".
 ///
-/// A room type other than "a room" means some client made it for a purpose of
-/// its own — ours makes them to hold image packs. Spaces are excluded because
-/// they're a type we do draw, in their own rail.
-fn is_utility_room(room: &Room) -> bool {
-    use matrix_sdk::ruma::room::RoomType;
+/// There is no agreed value. MSC3417 proposed `org.matrix.msc3417.call`,
+/// Element shipped `m.video_room` and, before that, `io.element.video`, and a
+/// room made by any of them is a room the user expects to see. Ruma only models
+/// the MSC3417 spelling, and only behind a feature we don't enable, so the
+/// comparison is on the raw string.
+const CALL_ROOM_TYPES: &[&str] = &["m.video_room", "io.element.video", "org.matrix.msc3417.call"];
 
-    !matches!(room.room_type(), None | Some(RoomType::Space))
+/// Whether a room is a call rather than a conversation.
+fn is_call_room_type(room_type: Option<&str>) -> bool {
+    room_type.is_some_and(|t| CALL_ROOM_TYPES.contains(&t))
+}
+
+/// Whether a room exists to hold data rather than to be visited.
+///
+/// This used to be "any room type we don't recognise", which is what MSC1772
+/// suggests — and it made voice rooms vanish from the sidebar while every other
+/// client still listed them under their space. A room the user joined
+/// disappearing is a much worse failure than an odd room appearing, so the test
+/// is now an explicit list of the types we know are storage.
+///
+/// Spaces aren't listed: they're drawn in their own rail and carry `is_space`.
+fn is_utility_room_type(room_type: Option<&str>) -> bool {
+    room_type == Some(crate::matrix::packs::PACK_ROOM_TYPE)
+}
+
+fn room_type_str(room: &Room) -> Option<String> {
+    room.room_type().map(|t| t.as_str().to_owned())
 }
 
 pub fn membership_str(state: RoomState) -> &'static str {
@@ -145,6 +165,8 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
     );
 
     let parent_spaces = collect_parent_spaces(room).await;
+    let room_type = room_type_str(room);
+    let room_type = room_type.as_deref();
 
     Ok(RoomSummary {
         id: room.room_id().to_string(),
@@ -155,7 +177,7 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         is_direct,
         is_encrypted: room.encryption_state().is_encrypted(),
         is_space: room.is_space(),
-        is_utility: is_utility_room(room),
+        is_utility: is_utility_room_type(room_type),
         is_favourite: room.is_favourite(),
         is_low_priority: room.is_low_priority(),
         is_muted: muted,
@@ -169,7 +191,7 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         recency: room.recency_stamp().map(|s| s.into()).unwrap_or(0),
         parent_spaces,
         has_active_call: room.has_active_room_call(),
-        is_video_room: room.is_call(),
+        is_video_room: room.is_call() || is_call_room_type(room_type),
     })
 }
 
@@ -772,4 +794,44 @@ pub async fn invite(core: &MatrixCore, room_id: &RoomId, user_id: &str) -> Resul
     let user_id = matrix_sdk::ruma::UserId::parse(user_id)?;
     core.room(&room_id.to_owned())?.invite_user_by_id(&user_id).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod room_type_tests {
+    use super::*;
+    use crate::matrix::packs::PACK_ROOM_TYPE;
+
+    #[test]
+    fn an_ordinary_room_is_neither() {
+        assert!(!is_utility_room_type(None));
+        assert!(!is_call_room_type(None));
+    }
+
+    #[test]
+    fn our_pack_rooms_stay_out_of_the_sidebar() {
+        assert!(is_utility_room_type(Some(PACK_ROOM_TYPE)));
+    }
+
+    #[test]
+    fn a_voice_room_belongs_in_the_sidebar() {
+        // The bug this guards: every one of these spellings used to be read as
+        // "some room type we don't know", which hid the room entirely.
+        for room_type in ["m.video_room", "io.element.video", "org.matrix.msc3417.call"] {
+            assert!(is_call_room_type(Some(room_type)), "{room_type} should be a call room");
+            assert!(!is_utility_room_type(Some(room_type)), "{room_type} should be visible");
+        }
+    }
+
+    #[test]
+    fn a_room_type_we_dont_know_is_still_shown() {
+        assert!(!is_utility_room_type(Some("com.example.something")));
+        assert!(!is_call_room_type(Some("com.example.something")));
+    }
+
+    #[test]
+    fn a_space_is_not_utility() {
+        // Spaces have their own flag and their own rail; classifying them as
+        // storage here would take them out of both.
+        assert!(!is_utility_room_type(Some("m.space")));
+    }
 }

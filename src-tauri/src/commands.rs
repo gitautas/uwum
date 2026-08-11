@@ -555,7 +555,7 @@ pub async fn request_verification(
     state: State<'_, AppState>,
     user_id: Option<String>,
 ) -> Result<()> {
-    verification::request(&app, &*state.core().await?, user_id).await
+    verification::request(&app, &state.core().await?, user_id).await
 }
 
 #[tauri::command]
@@ -607,7 +607,7 @@ pub async fn verify_device(
     state: State<'_, AppState>,
     device_id: String,
 ) -> Result<()> {
-    verification::verify_device(&app, &*state.core().await?, &device_id).await
+    verification::verify_device(&app, &state.core().await?, &device_id).await
 }
 
 #[tauri::command]
@@ -624,7 +624,7 @@ pub async fn enable_recovery(state: State<'_, AppState>) -> Result<String> {
 
 #[tauri::command]
 pub async fn recover_with_key(state: State<'_, AppState>, recovery_key: String) -> Result<()> {
-    verification::recover(&*state.core().await?, &recovery_key).await
+    verification::recover(&state.core().await?, &recovery_key).await
 }
 
 // ---------------------------------------------------------------------------

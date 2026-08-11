@@ -91,11 +91,46 @@ It means "cross-signed **or** locally trusted", and the SDK locally trusts the
 device it's running on. Use `is_verified_with_cross_signing()` for anything the
 user reads as a security claim.
 
+### Verifying a device does not, by itself, decrypt anything
+
+Two separate defaults have to be changed before verification does what the user
+thinks it does.
+
+`EncryptionSettings::backup_download_strategy` defaults to `Manual`, meaning the
+SDK *never* fetches room keys from the server-side backup. A newly verified
+device receives the backup's decryption key over `m.secret.send` and then sits on
+it. `auto_enable_backups` defaults to false, so on a fresh account there is no
+backup to fetch from either. `auth::encryption_settings` sets both.
+
+Even with keys arriving, the timelines already on screen don't necessarily
+re-read them: `Timeline` retries decryption for every event when it is *built*,
+which is why restarting the app "fixed" it. `verification::unlock_history` does
+the same work without the restart — wait for the backup to come up, download the
+keys for each open room, then `Timeline::retry_decryption` the sessions still
+showing as undecryptable. `recover()` runs it too, for the same reason.
+
 ### Space membership is recorded twice and neither half is reliable
 
 The space lists its children with `m.space.child`; a room *may* point back with
 `m.space.parent`, but most never do. Filtering on `parentSpaces` alone shows an
 empty space. `filterRooms` takes the union of both.
+
+### A room type is not permission to hide the room
+
+MSC1772 says a client should ignore room types it doesn't understand, and taking
+that literally hides real rooms: voice rooms carry a type, and there are three
+spellings in the wild (`m.video_room`, `io.element.video`,
+`org.matrix.msc3417.call`) of which ruma models one, behind a feature flag. A
+room the user joined and can see in every other client vanishing from the sidebar
+is far worse than an unfamiliar room appearing in it, so `is_utility_room_type`
+names the types we hide — ours, and only ours — rather than the ones we keep.
+
+### The verification modal has to outrank every other overlay
+
+There is a timeout running on the *other* device. A modal that opens behind the
+settings pane is a verification that fails, and settings is exactly where the
+user is when they start one, so `VerificationModal` sits above every other
+`zIndex` in the app.
 
 ### WKWebView won't load `<video>`/`<audio>` from a custom URI scheme
 

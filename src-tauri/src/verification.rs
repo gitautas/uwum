@@ -6,7 +6,7 @@
 //! with `msgtype: m.key.verification.request` (verifying someone else in a DM) —
 //! so both paths are handled.
 
-use std::sync::Arc;
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use futures_util::StreamExt;
 use matrix_sdk::{
@@ -22,6 +22,7 @@ use matrix_sdk::{
         },
     },
 };
+use matrix_sdk_ui::timeline::EncryptedMessage;
 use serde::Serialize;
 use tauri::AppHandle;
 
@@ -92,9 +93,11 @@ pub async fn watch_requests(app: AppHandle, core: Arc<MatrixCore>) {
 
     // Path 1: another of our own devices asks to verify, over to-device.
     let app_to_device = app.clone();
+    let core_to_device = core.clone();
     client.add_event_handler(
         move |event: ToDeviceKeyVerificationRequestEvent, client: Client| {
             let app = app_to_device.clone();
+            let core = core_to_device.clone();
             async move {
                 let Some(request) = client
                     .encryption()
@@ -103,15 +106,17 @@ pub async fn watch_requests(app: AppHandle, core: Arc<MatrixCore>) {
                 else {
                     return;
                 };
-                announce(app, request).await;
+                announce(app, core, request).await;
             }
         },
     );
 
     // Path 2: someone verifies us from inside a room (the DM flow).
     let app_in_room = app.clone();
+    let core_in_room = core.clone();
     client.add_event_handler(move |event: OriginalSyncRoomMessageEvent, client: Client| {
         let app = app_in_room.clone();
+        let core = core_in_room.clone();
         async move {
             if !matches!(event.content.msgtype, MessageType::VerificationRequest(_)) {
                 return;
@@ -123,7 +128,7 @@ pub async fn watch_requests(app: AppHandle, core: Arc<MatrixCore>) {
             else {
                 return;
             };
-            announce(app, request).await;
+            announce(app, core, request).await;
         }
     });
 
@@ -132,10 +137,11 @@ pub async fn watch_requests(app: AppHandle, core: Arc<MatrixCore>) {
 }
 
 /// Tell the UI about a request, then follow it until it resolves.
-async fn announce(app: AppHandle, request: VerificationRequest) {
+async fn announce(app: AppHandle, core: Arc<MatrixCore>, request: VerificationRequest) {
     emit(&app, EV_VERIFICATION_REQUEST, to_dto(&request));
 
     tokio::spawn(async move {
+        let is_self = request.is_self_verification();
         let mut changes = request.changes();
         while let Some(state) = changes.next().await {
             emit(
@@ -158,14 +164,82 @@ async fn announce(app: AppHandle, request: VerificationRequest) {
                 watch_sas(app.clone(), sas.clone(), request.flow_id().to_owned());
             }
 
-            if matches!(
-                state,
-                VerificationRequestState::Done | VerificationRequestState::Cancelled(_)
-            ) {
+            if matches!(state, VerificationRequestState::Done) {
+                // Verifying our own device is what unlocks the history; go and
+                // fetch it rather than making the user restart the app.
+                if is_self {
+                    tokio::spawn(unlock_history(core.clone()));
+                }
+                break;
+            }
+
+            if matches!(state, VerificationRequestState::Cancelled(_)) {
                 break;
             }
         }
     });
+}
+
+/// How long to wait for the backup decryption key to arrive after a
+/// verification, before giving up and retrying with whatever keys we do have.
+const BACKUP_WAIT: Duration = Duration::from_secs(30);
+
+/// Pull in the message history a freshly verified device has just earned.
+///
+/// Verification succeeding is not the end of the story. The other device then
+/// sends us our secrets — including the key to the server-side backup — as an
+/// `m.secret.send`, and only once *that* lands can the backup be read. Nothing
+/// drives the rest on its own, which is why the history used to stay unreadable
+/// until the app was restarted and every timeline was rebuilt from scratch.
+///
+/// So: wait for the backup to come up, download the keys for the rooms the user
+/// actually has open, and ask those timelines to decrypt again.
+async fn unlock_history(core: Arc<MatrixCore>) {
+    let backups = core.client.encryption().backups();
+
+    let deadline = tokio::time::Instant::now() + BACKUP_WAIT;
+    while !backups.are_enabled().await && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    // Snapshot rather than holding the lock across the network calls below —
+    // opening a room takes the same lock.
+    let open: Vec<_> =
+        core.timelines.lock().await.values().map(|open| open.timeline.clone()).collect();
+
+    for timeline in open {
+        let room_id = timeline.room().room_id().to_owned();
+
+        // Best-effort: a room with no keys in the backup, or no backup at all,
+        // is not an error — the retry below still runs, because the keys may
+        // have arrived over to-device gossip instead.
+        if let Err(e) = backups.download_room_keys_for_room(&room_id).await {
+            tracing::debug!("no backed-up keys for {room_id}: {e}");
+        }
+
+        let session_ids = undecryptable_sessions(&timeline).await;
+        if session_ids.is_empty() {
+            continue;
+        }
+        tracing::info!("retrying {} undecryptable sessions in {room_id}", session_ids.len());
+        timeline.retry_decryption(session_ids).await;
+    }
+}
+
+/// The Megolm sessions a timeline is currently showing as "can't decrypt".
+async fn undecryptable_sessions(timeline: &matrix_sdk_ui::Timeline) -> BTreeSet<String> {
+    timeline
+        .items()
+        .await
+        .iter()
+        .filter_map(|item| item.as_event())
+        .filter_map(|event| match event.content().as_unable_to_decrypt() {
+            Some(EncryptedMessage::MegolmV1AesSha2 { session_id, .. }) => Some(session_id.clone()),
+            // Olm-encrypted and unknown-algorithm events have no session to
+            // retry — no key will ever make them readable.
+            _ => None,
+        })
+        .collect()
 }
 
 fn sas_dto(sas: &SasVerification, flow_id: &str, state: &SasState) -> SasStateDto {
@@ -236,7 +310,11 @@ async fn find_sas(core: &MatrixCore, user_id: &str, flow_id: &str) -> Result<Sas
 }
 
 /// Ask another device (or user) to verify us.
-pub async fn request(app: &AppHandle, core: &MatrixCore, user_id: Option<String>) -> Result<()> {
+pub async fn request(
+    app: &AppHandle,
+    core: &Arc<MatrixCore>,
+    user_id: Option<String>,
+) -> Result<()> {
     let encryption = core.client.encryption();
 
     let request = match user_id {
@@ -267,7 +345,7 @@ pub async fn request(app: &AppHandle, core: &MatrixCore, user_id: Option<String>
         }
     };
 
-    announce(app.clone(), request).await;
+    announce(app.clone(), core.clone(), request).await;
     Ok(())
 }
 
@@ -360,7 +438,7 @@ pub async fn own_devices(core: &MatrixCore) -> Result<Vec<DeviceInfo>> {
 }
 
 /// Start verifying one of our own devices.
-pub async fn verify_device(app: &AppHandle, core: &MatrixCore, device_id: &str) -> Result<()> {
+pub async fn verify_device(app: &AppHandle, core: &Arc<MatrixCore>, device_id: &str) -> Result<()> {
     let user_id = core.own_user_id()?;
     let device_id = matrix_sdk::ruma::OwnedDeviceId::from(device_id);
 
@@ -377,7 +455,7 @@ pub async fn verify_device(app: &AppHandle, core: &MatrixCore, device_id: &str) 
         .await
         .map_err(|e| Error::Other(format!("couldn't start verification: {e}")))?;
 
-    announce(app.clone(), request).await;
+    announce(app.clone(), core.clone(), request).await;
     Ok(())
 }
 
@@ -435,12 +513,16 @@ pub async fn enable_recovery(core: &MatrixCore) -> Result<String> {
 }
 
 /// Restore access to backed-up keys using a recovery key the user kept.
-pub async fn recover(core: &MatrixCore, recovery_key: &str) -> Result<()> {
+pub async fn recover(core: &Arc<MatrixCore>, recovery_key: &str) -> Result<()> {
     core.client
         .encryption()
         .recovery()
         .recover(recovery_key)
         .await
         .map_err(|e| Error::Other(format!("that recovery key didn't work: {e}")))?;
+
+    // Same story as a successful verification: the keys are reachable now, but
+    // the timelines already on screen won't notice by themselves.
+    tokio::spawn(unlock_history(core.clone()));
     Ok(())
 }

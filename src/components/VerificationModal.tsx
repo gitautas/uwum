@@ -50,7 +50,13 @@ export function VerificationModal() {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        zIndex: 100,
+        // Above every other overlay — settings (120), the profile card (130)
+        // and the lightbox (200). A verification has a timeout running on the
+        // other device, so a modal that opens *behind* whatever the user
+        // happens to have open is a verification that fails: the emoji are
+        // never compared and the other side gives up. This is most obvious
+        // from the security pane, which is where you go to start one.
+        zIndex: 250,
       }}
     >
       <div
