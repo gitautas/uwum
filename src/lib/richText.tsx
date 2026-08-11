@@ -15,6 +15,7 @@
  * The allowlist follows the "safe" subset in the Matrix spec (§ m.room.message).
  */
 
+import { openUrl } from "@tauri-apps/plugin-opener";
 import type { CSSProperties, ReactNode } from "react";
 
 import { mediaUrl } from "./ipc";
@@ -64,6 +65,166 @@ function safeHref(raw: string | null): string | undefined {
   }
 }
 
+/**
+ * A link that opens where links should open: the user's browser.
+ *
+ * `target="_blank"` does nothing in a WebView — there is no tab to open — and
+ * letting the anchor navigate normally would replace the running app with the
+ * page, which the CSP forbids anyway. So the default is cancelled and the URL
+ * handed to the system. That also keeps the reader's session out of whatever
+ * they clicked: the page never loads in a context holding the IPC bridge.
+ */
+export function Link({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <a
+      href={href}
+      title={href}
+      rel="noreferrer noopener"
+      onClick={(e) => {
+        e.preventDefault();
+        // The row underneath has its own click handling; opening a link is not
+        // also a click on the message.
+        e.stopPropagation();
+        try {
+          void openUrl(href).catch(() => {});
+        } catch {
+          // Outside Tauri (tests, a browser preview) there's nothing to ask.
+        }
+      }}
+      style={{ textDecoration: "underline", cursor: "pointer" }}
+    >
+      {children}
+    </a>
+  );
+}
+
+/**
+ * Bare URLs in text nobody marked up.
+ *
+ * Most messages arrive as plain text — no `formatted_body` at all — so a link
+ * someone typed is just words unless we find it ourselves. Deliberately narrow:
+ * an explicit scheme, or a `www.` that plainly means one. Anything cleverer
+ * starts finding "urls" in ordinary sentences.
+ */
+const BARE_URL = /(?:https?:\/\/|www\.)[^\s<]+/gi;
+
+/** Punctuation that ends a sentence far more often than it ends a URL. */
+const TRAILING = ".,!?;:'\"";
+
+/** Closing brackets, and what opens them. */
+const CLOSERS: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
+
+function occurrences(text: string, char: string): number {
+  let count = 0;
+  for (const c of text) if (c === char) count += 1;
+  return count;
+}
+
+/**
+ * Drop the punctuation that belongs to the sentence rather than the link.
+ *
+ * `see https://uwu.lt/docs.` ends in a full stop that isn't part of the URL.
+ * Brackets are the interesting case: the closer in
+ * `https://en.wikipedia.org/wiki/Cat_(disambiguation)` *is* part of it, so a
+ * closer is only dropped when the URL never opened one to match.
+ */
+function trimTrailingPunctuation(url: string): string {
+  let end = url.length;
+
+  while (end > 0) {
+    const char = url[end - 1];
+
+    if (TRAILING.includes(char)) {
+      end -= 1;
+      continue;
+    }
+
+    const opener = CLOSERS[char];
+    if (opener) {
+      const so_far = url.slice(0, end);
+      // `so_far` includes this closer, so balanced means "opened at least as
+      // many as it closed".
+      if (occurrences(so_far, opener) >= occurrences(so_far, char)) break;
+      end -= 1;
+      continue;
+    }
+
+    break;
+  }
+
+  return url.slice(0, end);
+}
+
+/**
+ * The href a bare match should point at, or `undefined` if it shouldn't be a
+ * link at all.
+ */
+function bareUrlHref(raw: string): string | undefined {
+  const href = safeHref(raw.startsWith("www.") ? `https://${raw}` : raw);
+  if (!href) return undefined;
+
+  try {
+    const { hostname } = new URL(href);
+    // A host with no dot is not an address anyone meant to share — it's a
+    // scheme glued to a word, or "www" left behind by trimming. `localhost` is
+    // the one thing people really do paste at each other.
+    return hostname.includes(".") || hostname === "localhost" ? href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Turn the URLs in a run of text into links, leaving everything else alone.
+ *
+ * Returns the original string untouched when there's nothing to find, so the
+ * common case allocates nothing.
+ */
+export function linkify(text: string): ReactNode {
+  if (!text || !/https?:\/\/|www\./i.test(text)) return text;
+
+  const parts: ReactNode[] = [];
+  let consumed = 0;
+
+  BARE_URL.lastIndex = 0;
+  for (let match = BARE_URL.exec(text); match; match = BARE_URL.exec(text)) {
+    const raw = trimTrailingPunctuation(match[0]);
+    // Carry on from what we actually took, so trimmed punctuation is still
+    // available as text rather than being swallowed with the link.
+    BARE_URL.lastIndex = match.index + raw.length;
+
+    const href = bareUrlHref(raw);
+    if (!href) continue;
+
+    if (match.index > consumed) parts.push(text.slice(consumed, match.index));
+    parts.push(
+      <Link key={match.index} href={href}>
+        {raw}
+      </Link>,
+    );
+    consumed = match.index + raw.length;
+  }
+
+  if (parts.length === 0) return text;
+  if (consumed < text.length) parts.push(text.slice(consumed));
+  return <>{parts}</>;
+}
+
+/**
+ * Whether a text node is somewhere its content must be left exactly as it is.
+ *
+ * Inside an `<a>` the text is already a link, and linkifying it would nest one
+ * inside another; inside `<code>` or `<pre>` the whole point is that the text
+ * is shown verbatim.
+ */
+function isVerbatim(node: Node): boolean {
+  for (let el = node.parentElement; el; el = el.parentElement) {
+    const tag = el.tagName.toLowerCase();
+    if (tag === "a" || tag === "code" || tag === "pre") return true;
+  }
+  return false;
+}
+
 const codeStyle: CSSProperties = {
   fontFamily: "var(--font-mono)",
   fontSize: "0.9em",
@@ -104,7 +265,11 @@ function RenderNode({
   /** CSS height for custom emotes in this message. */
   emoticon: string;
 }): ReactNode {
-  if (node.nodeType === Node.TEXT_NODE) return node.nodeValue;
+  if (node.nodeType === Node.TEXT_NODE) {
+    const text = node.nodeValue ?? "";
+    // A sender whose client didn't mark up a URL still typed one.
+    return isVerbatim(node) ? text : linkify(text);
+  }
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
   if (depth > MAX_DEPTH) return node.textContent;
 
@@ -198,11 +363,7 @@ function RenderNode({
     case "a": {
       const href = safeHref(el.getAttribute("href"));
       if (!href) return <>{renderChildren(el, depth, emoticon)}</>;
-      return (
-        <a href={href} target="_blank" rel="noreferrer noopener">
-          {renderChildren(el, depth, emoticon)}
-        </a>
-      );
+      return <Link href={href}>{renderChildren(el, depth, emoticon)}</Link>;
     }
 
     case "img": {

@@ -12,7 +12,7 @@ import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
 import { imageLookup, reactionImage, reactionKeyFor } from "../lib/packs";
-import { renderFormattedBody } from "../lib/richText";
+import { linkify, renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
 import { useStore } from "../store";
 import { EmojiPicker } from "./EmojiPicker";
@@ -700,10 +700,12 @@ function ContentBody({ content, emojiOnly }: { content: Content; emojiOnly: bool
  * rebuilds it as React elements from an allowlist rather than injecting markup.
  */
 function Body({ body, formatted }: { body: string; formatted: string | null }) {
-  if (!formatted) return <>{body}</>;
+  // Plain text is the common case, and a URL in it is still a URL — nobody
+  // types `<a href>` into a chat box.
+  if (!formatted) return <>{linkify(body)}</>;
 
   const rendered = renderFormattedBody(formatted);
-  return <>{rendered ?? body}</>;
+  return <>{rendered ?? linkify(body)}</>;
 }
 
 function ImageBody({
