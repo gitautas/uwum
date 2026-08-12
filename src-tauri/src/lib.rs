@@ -222,6 +222,7 @@ fn install_settings_menu_item(app: &tauri::AppHandle) -> tauri::Result<()> {
 #[cfg(target_os = "linux")]
 fn enable_webrtc(app: &tauri::App) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window("main") else {
+        tracing::warn!("no main window at setup; WebRTC left disabled");
         return Ok(());
     };
 
@@ -239,6 +240,16 @@ fn enable_webrtc(app: &tauri::App) -> tauri::Result<()> {
             // media-stream is the one that puts `mediaDevices` on `navigator`.
             settings.set_enable_media_stream(true);
             settings.set_enable_webrtc(true);
+            // Read back rather than trust the setters. A WebKitGTK built
+            // without -DENABLE_WEB_RTC still carries the property, so a silent
+            // no-op here is the one failure mode we can detect from inside.
+            tracing::info!(
+                webrtc = settings.enables_webrtc(),
+                media_stream = settings.enables_media_stream(),
+                "applied WebKitGTK media settings"
+            );
+        } else {
+            tracing::warn!("WebView has no settings object; WebRTC left disabled");
         }
 
         webview.connect_permission_request(|_, request| {
