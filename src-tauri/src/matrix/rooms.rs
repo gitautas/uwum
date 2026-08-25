@@ -175,6 +175,10 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         canonical_alias: room.canonical_alias().map(|a| a.to_string()),
         avatar_url: room.avatar_url().map(|u| u.to_string()),
         is_direct,
+        dm_user_id: is_direct
+            .then(|| crate::matrix::presence::dm_partner(room))
+            .flatten()
+            .map(|u| u.to_string()),
         is_encrypted: room.encryption_state().is_encrypted(),
         is_space: room.is_space(),
         is_utility: is_utility_room_type(room_type),
@@ -336,6 +340,7 @@ async fn summarise_or_placeholder(room: &Room) -> RoomSummary {
                 canonical_alias: None,
                 avatar_url: None,
                 is_direct: false,
+                dm_user_id: None,
                 is_encrypted: false,
                 is_space: false,
                 is_utility: false,

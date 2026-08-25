@@ -13,6 +13,8 @@ import * as ipc from "../lib/ipc";
 import * as prefs from "../lib/settings";
 import type {
   ImagePack,
+  Presence,
+  PresenceUpdate,
   RoomsSnapshot,
   RoomsUpdate,
   RoomSummary,
@@ -81,6 +83,22 @@ interface State {
   paginating: Record<string, boolean>;
   typing: Record<string, TypingUser[]>;
   drafts: Record<string, Draft>;
+
+  /**
+   * Who's online, keyed by user ID — only the people something on screen has
+   * asked about (`lib/presence.ts` owns that set).
+   *
+   * Entries are replaced individually so a person's object keeps its identity
+   * while they haven't changed: every avatar reads its own key as a selector,
+   * and a fresh object per poll would re-render all of them every 30 seconds.
+   */
+  presence: Record<string, Presence>;
+  /**
+   * False once the homeserver has refused presence outright. The indicators
+   * disappear rather than claiming everyone is offline, which is what a server
+   * with the feature disabled would otherwise look like.
+   */
+  presenceSupported: boolean;
 
   // panels
   showInfo: boolean;
@@ -152,6 +170,8 @@ interface Actions {
   setTimeline(key: string, items: TimelineItem[]): void;
   loadOlder(): Promise<void>;
   applyTyping(update: TypingUpdate): void;
+  applyPresence(update: PresenceUpdate): void;
+  setPresenceSnapshot(users: Presence[]): void;
 
   setDraft(key: string, patch: Partial<Draft>): void;
   clearDraft(key: string): void;
@@ -183,6 +203,8 @@ const initial: State = {
   paginating: {},
   typing: {},
   drafts: {},
+  presence: {},
+  presenceSupported: true,
   showInfo: prefs.load().showInfoPanel,
   showSettings: false,
   profileCard: null,
@@ -396,6 +418,21 @@ export const useStore = create<State & Actions>((set, get) => ({
 
   applyTyping: ({ roomId, users }) =>
     set((s) => ({ typing: { ...s.typing, [roomId]: users } })),
+
+  applyPresence: ({ users, supported }) =>
+    set((s) => {
+      if (users.length === 0) return { presenceSupported: supported };
+      const presence = { ...s.presence };
+      for (const user of users) presence[user.userId] = user;
+      return { presence, presenceSupported: supported };
+    }),
+
+  setPresenceSnapshot: (users) =>
+    set((s) => {
+      const presence = { ...s.presence };
+      for (const user of users) presence[user.userId] = user;
+      return { presence };
+    }),
 
   setDraft: (key, patch) =>
     set((s) => ({

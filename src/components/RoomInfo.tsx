@@ -5,6 +5,7 @@ import * as ipc from "../lib/ipc";
 import { cachedProfile, loadProfile } from "../lib/profiles";
 import type { Profile, RoomMember, RoomSummary } from "../lib/types";
 import { useStore } from "../store";
+import { PresenceDot } from "./Presence";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
 import { ProfileHeader } from "./ProfileHeader";
 import { RoomSettingsDialog } from "./RoomSettings";
@@ -386,6 +387,7 @@ function MemberRow({ member }: { member: RoomMember }) {
           size={34}
           radius={12}
         />
+        <PresenceDot userId={member.userId} size={11} />
       </div>
       <button
         {...anchor}

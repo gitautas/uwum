@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "./lib/ipc";
 import { startNotifications } from "./lib/notify";
+import { resetPresence } from "./lib/presence";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
@@ -114,6 +115,7 @@ function Shell() {
   useBackendEvents();
   useAppShortcuts();
   useNotifications();
+  usePresenceReporter();
 
   return (
     <div
@@ -273,6 +275,72 @@ function useNotifications() {
   useEffect(() => startNotifications(), []);
 }
 
+/**
+ * Publish our own presence: online while the app is being used, away once it
+ * has been sat idle for a while.
+ *
+ * The homeserver can't tell idle from gone — it only sees requests — so the
+ * "away" half has to come from the client noticing that nobody has touched the
+ * window. The backend keeps "online" alive with its own heartbeat; this only
+ * has to report the transitions.
+ */
+function usePresenceReporter() {
+  useEffect(() => {
+    /** Discord's threshold, near enough, and long enough not to flap. */
+    const IDLE_AFTER_MS = 5 * 60 * 1000;
+
+    let idle = false;
+    let timer: number | undefined;
+
+    // Repeated calls with an unchanged state are dropped in the backend, so
+    // every mouse move doesn't become a request.
+    const report = (state: "online" | "unavailable") => {
+      void ipc.setOwnPresence(state).catch(() => {});
+    };
+
+    const arm = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        idle = true;
+        report("unavailable");
+      }, IDLE_AFTER_MS);
+    };
+
+    const onActivity = () => {
+      if (idle) {
+        idle = false;
+        report("online");
+      }
+      arm();
+    };
+
+    // A hidden window is a minimised or fully covered one — away without
+    // waiting out the timer.
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        idle = true;
+        window.clearTimeout(timer);
+        report("unavailable");
+      } else {
+        onActivity();
+      }
+    };
+
+    const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"];
+    for (const event of events) {
+      window.addEventListener(event, onActivity, { passive: true });
+    }
+    document.addEventListener("visibilitychange", onVisibility);
+    arm();
+
+    return () => {
+      window.clearTimeout(timer);
+      for (const event of events) window.removeEventListener(event, onActivity);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+}
+
 /** Subscribe to everything Rust pushes, for as long as the shell is mounted. */
 function useBackendEvents() {
   useEffect(() => {
@@ -282,6 +350,7 @@ function useBackendEvents() {
       ipc.onRooms((diffs) => useStore.getState().applyRoomDiffs(diffs)),
       ipc.onTimeline((update) => useStore.getState().applyTimelineUpdate(update)),
       ipc.onTyping((update) => useStore.getState().applyTyping(update)),
+      ipc.onPresence((update) => useStore.getState().applyPresence(update)),
       ipc.onSyncStatus((status) => useStore.getState().setSyncStatus(status)),
       ipc.onVerificationRequest((request) =>
         useStore.getState().setVerificationRequest(request),
@@ -318,8 +387,18 @@ function useBackendEvents() {
     loadSpaces();
     const spacesTimer = window.setInterval(loadSpaces, 60_000);
 
+    // Presence the backend already polled for before this mounted — same race
+    // the room snapshot above solves, and the same fix.
+    ipc
+      .getPresence()
+      .then(store.setPresenceSnapshot)
+      .catch(() => {});
+
     return () => {
       window.clearInterval(spacesTimer);
+      // Nothing is on screen to want presence any more; drop the watch set so
+      // signing back in starts from what the new session actually draws.
+      resetPresence();
       for (const subscription of subscriptions) {
         void subscription.then((unlisten) => unlisten()).catch(() => {});
       }

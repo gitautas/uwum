@@ -67,6 +67,11 @@ export interface RoomSummary {
   canonicalAlias: string | null;
   avatarUrl: string | null;
   isDirect: boolean;
+  /**
+   * The other person, when a DM has exactly one of them — what the sidebar's
+   * presence dot hangs off. Null for group rooms.
+   */
+  dmUserId: string | null;
   isEncrypted: boolean;
   isSpace: boolean;
   /** A room that holds data rather than a conversation — an image pack, say. */
@@ -275,6 +280,38 @@ export interface TypingUser {
 export interface TypingUpdate {
   roomId: string;
   users: TypingUser[];
+}
+
+// ---------------------------------------------------------------------------
+// presence
+// ---------------------------------------------------------------------------
+
+/**
+ * What the server says about someone's availability.
+ *
+ * `unknown` never comes off the wire: it's what the UI has before an answer
+ * arrives, and what it falls back to on a server with presence switched off.
+ */
+export type PresenceState = "online" | "unavailable" | "offline" | "unknown";
+
+export interface Presence {
+  userId: string;
+  presence: PresenceState;
+  /**
+   * The presence system's own free-text status — not the MSC4133 profile
+   * status the profile card shows.
+   */
+  statusMsg: string | null;
+  /** Unix ms, already converted from the server's relative age. */
+  lastActive: number | null;
+  currentlyActive: boolean;
+}
+
+export interface PresenceUpdate {
+  /** Only the people whose presence actually changed. */
+  users: Presence[];
+  /** False on a homeserver that has presence switched off. */
+  supported: boolean;
 }
 
 export interface SyncStatus {

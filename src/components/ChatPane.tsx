@@ -6,6 +6,7 @@ import * as ipc from "../lib/ipc";
 import type { RoomSummary } from "../lib/types";
 import { useStore } from "../store";
 import { CallBar, useCallState } from "./CallBar";
+import { PresenceLine, PresenceDot } from "./Presence";
 import { CallStage } from "./CallStage";
 import { Composer } from "./Composer";
 import { TimelineView } from "./TimelineView";
@@ -71,6 +72,9 @@ export function ChatPane({ room }: { room: RoomSummary }) {
               ring="var(--ink-950)"
             />
           )}
+          {room.dmUserId && (
+            <PresenceDot userId={room.dmUserId} size={13} ring="var(--ink-950)" />
+          )}
         </div>
 
         <div style={{ minWidth: 0 }}>
@@ -92,25 +96,31 @@ export function ChatPane({ room }: { room: RoomSummary }) {
               </Tag>
             )}
           </div>
-          <div
-            className="uwu-ellipsis"
-            style={{
-              fontSize: 12.5,
-              color: "var(--text-secondary)",
-              maxWidth: 520,
-            }}
-          >
-            {room.topic}{" "}
-            <span
+          {/* A DM's subtitle is the person, not the room: a topic and an
+              alias are things group rooms have. */}
+          {room.dmUserId ? (
+            <PresenceLine userId={room.dmUserId} style={{ marginTop: 3, fontSize: 11.5 }} />
+          ) : (
+            <div
+              className="uwu-ellipsis"
               style={{
-                fontFamily: "var(--font-mono)",
-                color: "var(--text-tertiary)",
-                fontSize: 11.5,
+                fontSize: 12.5,
+                color: "var(--text-secondary)",
+                maxWidth: 520,
               }}
             >
-              {room.canonicalAlias ?? ""}
-            </span>
-          </div>
+              {room.topic}{" "}
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-tertiary)",
+                  fontSize: 11.5,
+                }}
+              >
+                {room.canonicalAlias ?? ""}
+              </span>
+            </div>
+          )}
         </div>
 
         <div

@@ -140,3 +140,28 @@ export function joinNames(names: string[]): string {
   if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
   return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
 }
+
+/**
+ * How long ago someone was last active, in the room list's voice.
+ *
+ * The server gives an age rather than an instant, and the backend anchors it at
+ * poll time — so this keeps counting between polls instead of freezing at
+ * whatever the last round trip said.
+ */
+export function formatLastSeen(lastActive: number | null): string {
+  if (!lastActive) return "";
+
+  const seconds = Math.max(0, Math.round((Date.now() - lastActive) / 1000));
+  if (seconds < 90) return "just now";
+
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.round(hours / 24);
+  if (days < 7) return `${days}d ago`;
+
+  return `on ${dateFormat.format(new Date(lastActive)).toLowerCase()}`;
+}

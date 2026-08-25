@@ -10,6 +10,7 @@ import {
   useStore,
   type RoomFilter,
 } from "../store";
+import { PresenceDot } from "./Presence";
 import { Avatar, Button, ChannelBadge, HoverRow, Icon } from "./ui";
 
 const FILTERS: RoomFilter[] = ["all", "unread", "dms", "muted"];
@@ -361,6 +362,11 @@ function RoomRow({
         />
         {!room.isDirect && (
           <ChannelBadge kind={room.isVideoRoom ? "video" : "text"} />
+        )}
+        {/* A live call owns the same corner and is the more urgent of the two,
+            so presence stands down while one is running. */}
+        {room.dmUserId && !room.hasActiveCall && (
+          <PresenceDot userId={room.dmUserId} size={12} ring="var(--ink-950)" />
         )}
         {room.hasActiveCall && (
           <div

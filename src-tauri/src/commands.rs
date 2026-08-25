@@ -12,7 +12,7 @@ use crate::{
         StickerOptions, TimelineItemDto,
     },
     error::{Error, Result},
-    matrix::{auth, core::AppState, media, packs, profile, rooms, timeline},
+    matrix::{auth, core::AppState, media, packs, presence, profile, rooms, timeline},
     rtc, verification,
 };
 
@@ -499,6 +499,38 @@ pub async fn get_media_bytes(
 ) -> Result<tauri::ipc::Response> {
     let media = media::fetch(&state.core().await?.client, &mxc, None, None).await?;
     Ok(tauri::ipc::Response::new(media.bytes))
+}
+
+// ---------------------------------------------------------------------------
+// presence
+// ---------------------------------------------------------------------------
+
+/// Replace the set of people whose presence the UI wants pushed to it.
+///
+/// The frontend sends whoever is on screen; see `lib/presence.ts`.
+#[tauri::command]
+pub async fn watch_presence(
+    state: State<'_, AppState>,
+    user_ids: Vec<String>,
+) -> Result<()> {
+    presence::watch(&*state.core().await?, user_ids).await
+}
+
+/// Everything known right now, for a frontend that has just mounted.
+#[tauri::command]
+pub async fn get_presence(
+    state: State<'_, AppState>,
+) -> Result<Vec<presence::PresenceDto>> {
+    presence::snapshot(&*state.core().await?).await
+}
+
+/// Publish our own presence. Driven by the frontend's idle timer.
+#[tauri::command]
+pub async fn set_own_presence(
+    state: State<'_, AppState>,
+    presence: presence::OwnPresence,
+) -> Result<()> {
+    crate::matrix::presence::set_own(&*state.core().await?, presence).await
 }
 
 // ---------------------------------------------------------------------------

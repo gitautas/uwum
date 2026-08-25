@@ -36,6 +36,7 @@ function room(patch: Partial<RoomSummary> & { id: string }): RoomSummary {
     canonicalAlias: null,
     avatarUrl: null,
     isDirect: false,
+    dmUserId: null,
     isEncrypted: true,
     isSpace: false,
     isUtility: false,

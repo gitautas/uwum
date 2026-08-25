@@ -21,7 +21,7 @@ use crate::{
     events,
     matrix::{
         core::{AppState, MatrixCore},
-        rooms, session,
+        presence, rooms, session,
     },
 };
 
@@ -376,6 +376,7 @@ pub async fn bootstrap(
         data_dir,
         rooms: Mutex::new(Default::default()),
         timelines: Mutex::new(Default::default()),
+        presence: Default::default(),
         tasks: Mutex::new(Vec::new()),
         shutting_down: AtomicBool::new(false),
     });
@@ -386,6 +387,7 @@ pub async fn bootstrap(
     tasks.push(events::spawn_sync_status_task(app.clone(), core.clone()));
     tasks.push(rooms::spawn_room_list_task(app.clone(), core.clone()));
     tasks.push(events::spawn_verification_task(app.clone(), core.clone()));
+    tasks.push(presence::spawn_presence_task(app.clone(), core.clone()));
     core.tasks.lock().await.extend(tasks);
 
     Ok(core)

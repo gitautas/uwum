@@ -16,6 +16,7 @@ use crate::{
 pub const EV_ROOMS: &str = "matrix://rooms";
 pub const EV_TIMELINE: &str = "matrix://timeline";
 pub const EV_TYPING: &str = "matrix://typing";
+pub const EV_PRESENCE: &str = "matrix://presence";
 pub const EV_SYNC_STATUS: &str = "matrix://sync-status";
 pub const EV_VERIFICATION_STATE: &str = "matrix://verification-state";
 pub const EV_VERIFICATION_REQUEST: &str = "matrix://verification-request";

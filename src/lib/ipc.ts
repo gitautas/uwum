@@ -21,6 +21,8 @@ import type {
   PackEdit,
   PackRoom,
   PackTarget,
+  Presence,
+  PresenceUpdate,
   RecoveryStatus,
   RoomMember,
   RoomPermissions,
@@ -301,6 +303,27 @@ export const getEventBody = (roomId: string, eventId: string) =>
   invoke<string | null>("get_event_body", { roomId, eventId });
 
 // ---------------------------------------------------------------------------
+// presence
+// ---------------------------------------------------------------------------
+
+/**
+ * Declare who the UI is drawing. Replaces the previous set.
+ *
+ * Presence is polled per user (see `presence.rs`), so this is the difference
+ * between a handful of requests a minute and one per person you've ever met.
+ * `lib/presence.ts` owns the set; nothing else should call this.
+ */
+export const watchPresence = (userIds: string[]) =>
+  invoke<void>("watch_presence", { userIds });
+
+/** Everything the backend already knows, for a freshly-mounted UI. */
+export const getPresence = () => invoke<Presence[]>("get_presence");
+
+/** Publish our own availability — the idle timer drives this. */
+export const setOwnPresence = (presence: "online" | "unavailable" | "offline") =>
+  invoke<void>("set_own_presence", { presence });
+
+// ---------------------------------------------------------------------------
 // media
 // ---------------------------------------------------------------------------
 
@@ -436,6 +459,9 @@ export const onTimeline = (fn: (update: TimelineUpdate) => void): Promise<Unlist
 
 export const onTyping = (fn: (update: TypingUpdate) => void): Promise<UnlistenFn> =>
   listen<TypingUpdate>("matrix://typing", (e) => fn(e.payload));
+
+export const onPresence = (fn: (update: PresenceUpdate) => void): Promise<UnlistenFn> =>
+  listen<PresenceUpdate>("matrix://presence", (e) => fn(e.payload));
 
 export const onSyncStatus = (fn: (status: SyncStatus) => void): Promise<UnlistenFn> =>
   listen<SyncStatus>("matrix://sync-status", (e) => fn(e.payload));

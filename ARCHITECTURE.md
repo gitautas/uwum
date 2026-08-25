@@ -16,6 +16,7 @@ src-tauri/src/
     rooms.rs      room summaries + the sliding-sync diff stream
     timeline.rs   open/close timelines, send, edit, react, redact, paginate
     media.rs      mxc:// fetching behind the uwum:// scheme
+    presence.rs   who's online, polled for whoever is on screen
   verification.rs emoji SAS + key recovery
   rtc.rs          MatrixRTC membership + LiveKit token exchange
 
@@ -26,6 +27,7 @@ src/
   lib/richText.ts renders other people's HTML without trusting it
   lib/blobMedia.ts video/audio over IPC, because a custom scheme can't serve it
   lib/call.ts     LiveKit room, mic, participant state
+  lib/presence.ts refcounts who the UI is drawing, so Rust polls no one else
   store/          zustand store: a projection of Rust's truth + UI state
   components/     the design, implemented
 ```
@@ -174,6 +176,32 @@ A plain and an encrypted source for the same URI share one entry, so fetching
 encrypted media as plain poisons the cache with ciphertext — and fixing the
 fetch isn't enough on its own. `purge_poisoned_media_cache` drops the cache once,
 behind a marker file.
+
+### Presence never arrives over sliding sync
+
+`m.presence` is an EDU, and EDUs come down legacy `/sync`. `SyncService` is the
+only sync we run and there is no presence extension in this SDK, so nothing ever
+reaches an event handler — which looks exactly like a homeserver with presence
+disabled. `presence.rs` polls `GET /presence/{user}/status` instead, for the set
+of people the UI says it is drawing.
+
+That set has to be small, because it is one request per person per round. It
+can't be decided in one place either — the member list, the sidebar's DMs and
+the open profile card each know their own people — so `lib/presence.ts`
+refcounts interest and pushes the union to Rust.
+
+The response's `last_active_ago` is an *age*, and stops being true the moment it
+arrives; it's anchored to an absolute instant at receipt so "last seen 12m ago"
+keeps counting between polls rather than freezing at whatever the last round
+trip said.
+
+### A server with presence off looks exactly like a server where nobody is home
+
+Plenty of deployments run with presence disabled, and there is no capability
+flag to ask. Painting that as a grey "offline" dot on every person in the app is
+a confident lie, so "we don't know" draws *nothing* — no dot, no last-seen line.
+The backend only reports `supported: false` when every request in a round is
+refused; one failure among several is just a user we can't see.
 
 ### macOS needs `NSMicrophoneUsageDescription`
 

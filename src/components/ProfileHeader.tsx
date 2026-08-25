@@ -4,6 +4,7 @@ import { accentFor } from "../lib/display";
 import { mediaUrl } from "../lib/ipc";
 import type { Profile } from "../lib/types";
 import { useStore } from "../store";
+import { PresenceLine } from "./Presence";
 import { Avatar } from "./ui";
 
 /**
@@ -111,6 +112,8 @@ export function ProfileHeader({
         >
           {userId}
         </div>
+
+        <PresenceLine userId={userId} />
 
         {profile?.status && (
           <div

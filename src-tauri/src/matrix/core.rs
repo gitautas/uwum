@@ -20,7 +20,10 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{dto::SessionInfo, error::Result, matrix::session::SessionPointer};
+use crate::{
+    dto::SessionInfo, error::Result, matrix::presence::PresenceHub,
+    matrix::session::SessionPointer,
+};
 
 /// A timeline the UI has open, plus the task streaming its diffs.
 pub struct OpenTimeline {
@@ -66,6 +69,9 @@ pub struct MatrixCore {
     pub rooms: Mutex<RoomMirror>,
     /// Keyed by room ID, or `"<room_id>|<thread_root>"` for thread timelines.
     pub timelines: Mutex<HashMap<String, OpenTimeline>>,
+    /// Who's online: the watched set, the last values seen, and what we
+    /// publish about ourselves. Polled rather than synced — see `presence.rs`.
+    pub presence: PresenceHub,
     /// Background tasks owned by this session, aborted on sign-out.
     pub tasks: Mutex<Vec<JoinHandle<()>>>,
     pub shutting_down: AtomicBool,
@@ -92,6 +98,11 @@ impl MatrixCore {
     /// Abort every background task and stop syncing. Called on sign-out and on
     /// window close so the SQLite store is released cleanly.
     pub async fn shutdown(&self) {
+        // Before the session goes: tell the server we're gone, so a DM partner
+        // sees us drop offline now rather than when the server's own timeout
+        // notices. Bounded, because it sits on the window-close path.
+        crate::matrix::presence::go_offline(self).await;
+
         self.shutting_down.store(true, std::sync::atomic::Ordering::SeqCst);
         self.sync_service.stop().await;
 

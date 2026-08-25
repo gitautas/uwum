@@ -29,6 +29,8 @@
 --accent-tertiary:var(--violet-500);
 --accent-quaternary:var(--cyan-500);
 --status-online:var(--green-500);
+--status-idle:var(--amber-500);
+--status-offline:var(--ink-500);
 --status-warning:var(--amber-500);
 --status-danger:var(--red-500);
 --focus-ring:var(--acid-500);

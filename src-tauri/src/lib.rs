@@ -72,6 +72,10 @@ pub fn run() {
             commands::send_attachment_bytes,
             commands::get_pinned_events,
             commands::get_event_body,
+            // presence
+            commands::watch_presence,
+            commands::get_presence,
+            commands::set_own_presence,
             // media
             commands::get_profile,
             commands::set_profile,

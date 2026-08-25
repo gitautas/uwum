@@ -63,6 +63,10 @@ pub struct RoomSummary {
     pub canonical_alias: Option<String>,
     pub avatar_url: Option<String>,
     pub is_direct: bool,
+    /// The other person, when a DM has exactly one of them — what a presence
+    /// dot in the sidebar hangs off. `None` for group rooms, and for "direct"
+    /// rooms with any number of members other than one, which the flag allows.
+    pub dm_user_id: Option<String>,
     pub is_encrypted: bool,
     pub is_space: bool,
     /// A room that isn't a conversation — a pack room, or anything else with a
