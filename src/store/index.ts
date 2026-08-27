@@ -28,7 +28,7 @@ import type {
   TypingUser,
   VerificationRequestInfo,
 } from "../lib/types";
-import { isSasUpdate } from "../lib/types";
+import { isLiveVerification, isSasUpdate } from "../lib/types";
 
 export type RoomFilter = "all" | "unread" | "dms" | "muted";
 
@@ -452,10 +452,31 @@ export const useStore = create<State & Actions>((set, get) => ({
   setSyncStatus: (syncStatus) => set({ syncStatus }),
 
   setVerificationRequest: (verificationRequest) =>
-    set({ verificationRequest, sasState: null }),
+    set((s) => {
+      // A request arriving while another is still running does not replace it.
+      // Abandoned flows are common — a retry leaves the first attempt open, and
+      // the other client announces a fresh one every time you press verify —
+      // and whichever arrived last used to win. That put a *stale* flow's id in
+      // the modal, so the buttons then acted on a verification nobody was
+      // looking at. `null` always wins: that is the user closing the dialog.
+      if (verificationRequest && isLiveVerification(s.verificationRequest)) {
+        return s.verificationRequest.flowId === verificationRequest.flowId ? s : {};
+      }
+      return { verificationRequest, sasState: null };
+    }),
 
   applyVerificationUpdate: (update) =>
-    set(() => {
+    set((s) => {
+      // Updates are addressed to a flow, and until now nothing checked which.
+      // Every abandoned verification keeps emitting — a superseded request is
+      // cancelled by the other side, sometimes minutes later — and that cancel
+      // would overwrite whatever was on screen. The symptom is the one that
+      // sent us looking: a verification that is going fine suddenly reads "not
+      // verified — the user cancelled", reporting the death of a flow the user
+      // had already forgotten about.
+      if (!s.verificationRequest || s.verificationRequest.flowId !== update.flowId) {
+        return {};
+      }
       if (isSasUpdate(update)) {
         // Only the SAS half moves. The request is deliberately left alone so
         // the modal stays up on completion and the user sees the outcome; it

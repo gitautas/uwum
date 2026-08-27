@@ -332,6 +332,10 @@ export interface VerificationRequestInfo {
   state: "created" | "requested" | "ready" | "transitioned" | "done" | "cancelled";
   /** Set when the flow was cancelled before SAS ever started. */
   cancelReason: string | null;
+  /** Which side sent the cancel — `null` unless the flow was cancelled. */
+  cancelledByUs: boolean | null;
+  /** The spec cancel code: `m.user`, `m.timeout`, `m.unknown_method`, … */
+  cancelCode: string | null;
 }
 
 export interface SasEmoji {
@@ -353,6 +357,8 @@ export interface SasStateInfo {
   emoji: SasEmoji[] | null;
   decimals: [number, number, number] | null;
   cancelReason: string | null;
+  cancelledByUs: boolean | null;
+  cancelCode: string | null;
 }
 
 /** The two verification payloads share an event channel; this tells them apart. */
@@ -360,6 +366,19 @@ export function isSasUpdate(
   update: VerificationRequestInfo | SasStateInfo,
 ): update is SasStateInfo {
   return "emoji" in update;
+}
+
+/**
+ * Is this verification still running?
+ *
+ * A finished flow stays in the store on purpose, so the user can read the
+ * outcome before dismissing it. That makes "there is a request" a useless test
+ * for "a verification is in progress" — this is the one that means it.
+ */
+export function isLiveVerification(
+  request: VerificationRequestInfo | null,
+): request is VerificationRequestInfo {
+  return !!request && request.state !== "done" && request.state !== "cancelled";
 }
 
 export interface Profile {
