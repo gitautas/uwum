@@ -2,7 +2,15 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` lets the page reach under the notch and home
+      indicator, which is what makes `env(safe-area-inset-*)` non-zero.
+      `maximum-scale` stops iOS zooming the whole shell when a text field
+      focuses — a chat app's composer would otherwise shove the layout
+      sideways on every tap. -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0"
+    />
     <meta name="color-scheme" content="dark" />
     <title>uwum</title>
   </head>

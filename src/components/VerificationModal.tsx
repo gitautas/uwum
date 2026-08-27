@@ -64,7 +64,8 @@ export function VerificationModal() {
     >
       <div
         style={{
-          width: 440,
+          // Fits a phone without a horizontal scroll; unchanged on desktop.
+        width: "min(440px, calc(100vw - 32px))",
           padding: 28,
           borderRadius: 28,
           background: "var(--surface-card)",

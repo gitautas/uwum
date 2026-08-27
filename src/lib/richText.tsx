@@ -317,7 +317,9 @@ function RenderNode({
           className="selectable"
           style={{
             marginTop: 6,
-            maxWidth: 560,
+            // The block scrolls its own long lines (`overflow-x` below); this
+            // stops it widening the message instead.
+            maxWidth: "min(560px, 100%)",
             background: "var(--ink-900)",
             border: "1px solid var(--border-subtle)",
             borderRadius: 14,
@@ -405,7 +407,7 @@ function RenderNode({
         <img
           src={src}
           alt={alt}
-          style={{ maxWidth: 240, maxHeight: 180, borderRadius: 10, verticalAlign: "middle" }}
+          style={{ maxWidth: "min(240px, 100%)", maxHeight: 180, borderRadius: 10, verticalAlign: "middle" }}
         />
       );
     }

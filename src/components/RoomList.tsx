@@ -15,7 +15,10 @@ import { Avatar, Button, ChannelBadge, HoverRow, Icon } from "./ui";
 
 const FILTERS: RoomFilter[] = ["all", "unread", "dms", "muted"];
 
-export function RoomList() {
+/** `onOpenSpaces` is passed only by the mobile shell, where this list is the
+    root view and the spaces rail is a drawer rather than a permanent column.
+    See `ChatPane` for why the prop doubles as the layout switch. */
+export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
   const {
     allRooms,
     activeRoomId,
@@ -68,23 +71,52 @@ export function RoomList() {
       style={{
         position: "relative",
         zIndex: 1,
-        width: 298,
-        flex: "none",
+        width: onOpenSpaces ? "100%" : 298,
+        flex: onOpenSpaces ? 1 : "none",
         display: "flex",
         flexDirection: "column",
         borderRight: "1px solid var(--border-subtle)",
         background: "rgba(17,17,23,.72)",
       }}
     >
-      <div className="uwu-drag" style={{ padding: "18px 18px 12px" }}>
+      <div
+        className="uwu-drag"
+        style={{
+          padding: onOpenSpaces
+            ? "calc(var(--safe-top) + 12px) 14px 12px"
+            : "18px 18px 12px",
+        }}
+      >
         <div
           style={{
             display: "flex",
-            alignItems: "baseline",
+            // A button won't sit on a text baseline; centre the row once one
+            // is in it.
+            alignItems: onOpenSpaces ? "center" : "baseline",
             justifyContent: "space-between",
             gap: 8,
           }}
         >
+          {onOpenSpaces && (
+            <button
+              onClick={onOpenSpaces}
+              aria-label="spaces"
+              className="uwu-no-drag"
+              style={{
+                flex: "none",
+                width: 44,
+                height: 44,
+                marginLeft: -12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              <Icon name="squares-four" size={20} color="var(--text-secondary)" />
+            </button>
+          )}
+
           <div
             className="uwu-ellipsis"
             style={{

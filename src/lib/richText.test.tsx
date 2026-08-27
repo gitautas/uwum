@@ -149,6 +149,8 @@ describe("renderFormattedBody — custom emotes (MSC2545)", () => {
   it("leaves ordinary inline images at image size", () => {
     const img = html('<img src="mxc://veil.gg/pic" alt="a picture">').querySelector("img");
     expect(img?.style.height).toBe("");
-    expect(img?.style.maxWidth).toBe("240px");
+    // 240 is the intended size — the `min()` caps it to the container as well,
+    // so a narrow screen gets a smaller picture rather than a sideways scroll.
+    expect(img?.style.maxWidth).toBe("min(240px, 100%)");
   });
 });

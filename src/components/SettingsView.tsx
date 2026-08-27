@@ -6,6 +6,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 
 import { call } from "../lib/call";
+import { useIsMobile } from "../lib/viewport";
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { invalidateProfile } from "../lib/profiles";
@@ -73,6 +74,8 @@ export function SettingsView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, close]);
 
+  const isMobile = useIsMobile();
+
   if (!open || !session) return null;
 
   return (
@@ -82,6 +85,10 @@ export function SettingsView() {
         inset: 0,
         zIndex: 120,
         display: "flex",
+        // A 232px nav beside the content leaves 158px for the settings
+        // themselves on a phone. Stack them instead: the nav becomes a strip
+        // the sections scroll along horizontally.
+        flexDirection: isMobile ? "column" : "row",
         background: "var(--surface-app)",
       }}
     >
@@ -94,14 +101,21 @@ export function SettingsView() {
       <div
         className="uwu-scroll"
         style={{
-          width: 232,
+          width: isMobile ? "100%" : 232,
           flex: "none",
-          padding: "52px 12px 20px",
+          padding: isMobile
+            ? "calc(var(--safe-top) + 10px) 10px 8px"
+            : "52px 12px 20px",
           background: "var(--ink-900)",
-          borderRight: "1px solid var(--border-subtle)",
+          borderRight: isMobile ? undefined : "1px solid var(--border-subtle)",
+          borderBottom: isMobile ? "1px solid var(--border-subtle)" : undefined,
+          display: isMobile ? "flex" : undefined,
+          gap: isMobile ? 6 : undefined,
+          overflowX: isMobile ? "auto" : undefined,
+          overflowY: isMobile ? "hidden" : undefined,
         }}
       >
-        <RaveLabel style={{ padding: "0 10px 10px" }}>settings</RaveLabel>
+        {!isMobile && <RaveLabel style={{ padding: "0 10px 10px" }}>settings</RaveLabel>}
         {SECTIONS.map((entry) => (
           <button
             key={entry.id}
@@ -110,9 +124,11 @@ export function SettingsView() {
               display: "flex",
               alignItems: "center",
               gap: 10,
-              width: "100%",
+              width: isMobile ? "auto" : "100%",
+              flex: isMobile ? "none" : undefined,
+              whiteSpace: isMobile ? "nowrap" : undefined,
               padding: "9px 12px",
-              marginBottom: 3,
+              marginBottom: isMobile ? 0 : 3,
               borderRadius: 12,
               cursor: "pointer",
               textAlign: "left",
@@ -137,8 +153,20 @@ export function SettingsView() {
       </div>
 
       {/* content */}
-      <div className="uwu-scroll" style={{ flex: 1, padding: "52px 0 40px" }}>
-        <div style={{ maxWidth: 620, margin: "0 auto", padding: "0 40px" }}>
+      <div
+        className="uwu-scroll"
+        style={{
+          flex: 1,
+          padding: isMobile ? "20px 0 calc(var(--safe-bottom) + 32px)" : "52px 0 40px",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 620,
+            margin: "0 auto",
+            padding: isMobile ? "0 16px" : "0 40px",
+          }}
+        >
           {section === "account" && <AccountSection />}
           {section === "security" && <SecuritySection />}
           {section === "voice" && <VoiceSection />}

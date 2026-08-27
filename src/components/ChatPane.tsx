@@ -11,9 +11,15 @@ import { CallStage } from "./CallStage";
 import { Composer } from "./Composer";
 import { TimelineView } from "./TimelineView";
 import { VerifyBanner } from "./VerificationModal";
-import { Avatar, ChannelBadge, Icon, Tag } from "./ui";
+import { Avatar, ChannelBadge, Icon } from "./ui";
 
-export function ChatPane({ room }: { room: RoomSummary }) {
+/**
+ * `onBack` is supplied only by the mobile shell, where this pane is the whole
+ * screen rather than a column. Its presence is what switches the pane into
+ * full-bleed mode — there is no separate `isMobile` check, so the two can never
+ * disagree about which layout is on screen.
+ */
+export function ChatPane({ room, onBack }: { room: RoomSummary; onBack?: () => void }) {
   const { threadRoot, showInfo, toggleInfo, openThread, showBanner } = useStore(
     useShallow((s) => ({
       threadRoot: s.activeThreadRoot,
@@ -46,7 +52,11 @@ export function ChatPane({ room }: { room: RoomSummary }) {
         position: "relative",
         zIndex: 1,
         flex: 1,
-        minWidth: 480,
+        // The desktop floor keeps the timeline readable beside the other
+        // columns; on a phone this pane *is* the window, so it takes what it
+        // gets. `0` rather than `auto` so a long unbroken message can't push
+        // the pane wider than the screen.
+        minWidth: onBack ? 0 : 480,
         display: "flex",
         flexDirection: "column",
         background: "var(--surface-canvas)",
@@ -57,14 +67,42 @@ export function ChatPane({ room }: { room: RoomSummary }) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
-          padding: "14px 22px",
+          gap: onBack ? 10 : 14,
+          // The header is the top of the screen on a phone, so it carries the
+          // notch inset itself rather than letting the status bar overlap it.
+          padding: onBack ? "calc(var(--safe-top) + 8px) 12px 8px" : "14px 22px",
           borderBottom: "1px solid var(--border-subtle)",
           background: "rgba(17,17,23,.6)",
         }}
       >
+        {onBack && (
+          <button
+            onClick={onBack}
+            aria-label="back to rooms"
+            style={{
+              flex: "none",
+              // 44 is Apple's minimum touch target; the icon inside is 18.
+              width: 44,
+              height: 44,
+              marginLeft: -10,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+            }}
+          >
+            <Icon name="caret-left" size={18} color="var(--text-secondary)" />
+          </button>
+        )}
+
         <div style={{ position: "relative", flex: "none" }}>
-          <Avatar id={room.id} name={room.name} mxc={room.avatarUrl} size={42} radius={15} />
+          <Avatar
+            id={room.id}
+            name={room.name}
+            mxc={room.avatarUrl}
+            size={onBack ? 32 : 42}
+            radius={onBack ? 11 : 15}
+          />
           {!room.isDirect && (
             <ChannelBadge
               kind={room.isVideoRoom ? "video" : "text"}
@@ -77,8 +115,15 @@ export function ChatPane({ room }: { room: RoomSummary }) {
           )}
         </div>
 
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ minWidth: 0, flex: onBack ? 1 : undefined }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              minWidth: 0,
+            }}
+          >
             <span
               className="uwu-ellipsis"
               style={{
@@ -90,16 +135,37 @@ export function ChatPane({ room }: { room: RoomSummary }) {
             >
               {room.name}
             </span>
+            {/* A lock is the whole message. Spelling out "e2e" beside it said
+                the same thing twice, and did it in the row that has the least
+                space to spare. The title carries the detail for anyone who
+                wants it. */}
             {room.isEncrypted && (
-              <Tag icon="lock-key" colour="var(--accent-primary)">
-                e2e
-              </Tag>
+              <span
+                title="encrypted end-to-end — only people in this room can read it"
+                aria-label="end-to-end encrypted"
+                style={{ display: "flex", flex: "none" }}
+              >
+                <Icon name="lock-key" size={14} color="var(--accent-primary)" />
+              </span>
             )}
           </div>
           {/* A DM's subtitle is the person, not the room: a topic and an
               alias are things group rooms have. */}
           {room.dmUserId ? (
-            <PresenceLine userId={room.dmUserId} style={{ marginTop: 3, fontSize: 11.5 }} />
+            <PresenceLine
+              userId={room.dmUserId}
+              style={{
+                marginTop: 3,
+                fontSize: 11.5,
+                // "last seen 3h ago" wraps to three lines in a narrow header
+                // and doubles its height. `PresenceLine` is a flex row, so
+                // `text-overflow` would do nothing here — keeping it on one
+                // line and clipping the overflow is the part that works.
+                ...(onBack
+                  ? { whiteSpace: "nowrap" as const, overflow: "hidden", minWidth: 0 }
+                  : {}),
+              }}
+            />
           ) : (
             <div
               className="uwu-ellipsis"
@@ -127,16 +193,18 @@ export function ChatPane({ room }: { room: RoomSummary }) {
           className="uwu-no-drag"
           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}
         >
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 11,
-              color: "var(--text-tertiary)",
-              marginRight: 4,
-            }}
-          >
-            {room.memberCount}
-          </span>
+          {!onBack && (
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                marginRight: 4,
+              }}
+            >
+              {room.memberCount}
+            </span>
+          )}
           <HeaderButton
             icon={inThisCall ? "phone-x" : "phone-call"}
             title={inThisCall ? "leave the call" : "start a voice call"}

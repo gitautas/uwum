@@ -7,6 +7,13 @@ body,
   margin: 0;
   height: 100%;
   background: var(--surface-app);
+  /* iOS inflates the font size of text in a narrow column — "text autosizing".
+     It exists to make desktop pages readable on a phone, and it wrecks a design
+     with fixed sizes: 13px renders near 20px, everything looks zoomed, and
+     fixed-height boxes clip the text that grew inside them. Our layout is
+     already sized for the viewport, so opt out. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -16,6 +23,10 @@ body {
   /* the whole window is a chat app, not a document — no accidental text drag */
   user-select: none;
   cursor: default;
+  /* Touch: kill the grey flash on every tap, and the 300ms double-tap-to-zoom
+     delay that makes a tap-driven UI feel broken. */
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 a {
@@ -88,6 +99,60 @@ button {
 .uwu-scroll {
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Momentum scrolling in WKWebView, and no rubber-banding of the whole shell
+     when a pane hits its end. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- mobile ----------------------------------------------------------- */
+
+/* Scrollbars are a pointer affordance. On a touch screen they only ever show
+   up as a grey smear over content that is already scrolling under a finger. */
+@media (max-width: 767px) {
+  ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+
+  /* Nothing may scroll the shell sideways. A single over-wide child — a long
+     code block, an unbroken URL — would otherwise let the entire app slide
+     left and reveal the page background behind it. */
+  html,
+  body,
+  #root {
+    max-width: 100%;
+    overflow-x: hidden;
+    /* No rubber-band on the shell itself; panes still scroll normally. */
+    overscroll-behavior: none;
+  }
+
+  /* The backstop. Every width in the message path is capped to its container,
+     but one new element with an intrinsic minimum wider than the screen would
+     silently reintroduce a sideways-sliding app — a whole-layout break from a
+     local mistake. Clip it at the pane instead. Anything legitimately wide (a
+     code block) carries its own `overflow-x: auto` and still scrolls inside
+     itself. */
+  .uwu-scroll {
+    overflow-x: hidden;
+  }
+
+  /* Take the long press for ourselves.
+     Message text opts into selection via `.selectable`, and on iOS that means a
+     long press raises the system's Copy/Look Up/Translate callout — competing
+     with the press-and-hold that opens the action sheet, which is what you get
+     if only `-webkit-touch-callout` is set: no callout, but a selection still
+     forms under your finger.
+     So: the whole row and everything in it, and the `-webkit-` prefixed
+     property, which is the one WebKit's selection actually honours. The sheet
+     renders inside the row, so this covers it too. Nothing is lost — the sheet
+     carries "copy text" — and it is scoped to messages, so selectable text
+     elsewhere in the app behaves normally. */
+  .uwu-msg,
+  .uwu-msg * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
 }
 
 .uwu-ellipsis {

@@ -93,8 +93,51 @@ fn write_private(path: &Path, contents: &str) -> Result<()> {
     Ok(())
 }
 
-fn keyring_entry(user_id: &str) -> Option<keyring::Entry> {
-    match keyring::Entry::new(KEYRING_SERVICE, user_id) {
+/// The keychain entry type, which is not the same crate layer on every
+/// platform. `keyring`'s `v1` API picks a store for macOS, Windows and *nix,
+/// but returns `Invalid("platform", ..)` on iOS — it deliberately covers no
+/// mobile target. iOS therefore talks to `keyring_core` directly, against the
+/// data-protection keychain registered in `install_ios_store`.
+#[cfg(not(target_os = "ios"))]
+type KeychainEntry = keyring::Entry;
+#[cfg(target_os = "ios")]
+type KeychainEntry = keyring_core::Entry;
+
+/// Register the iOS data-protection keychain as the process-wide store, once.
+///
+/// `Store::new` uses the app's default access group, which the signing identity
+/// supplies — no `keychain-access-groups` entitlement is needed as long as we
+/// never share items with another app.
+///
+/// Note the accessibility this implies: items are readable only while the
+/// device is unlocked. A sync resuming on a locked phone sees a keychain error
+/// here, not a missing session, so it must never be treated as a sign-out.
+#[cfg(target_os = "ios")]
+fn install_ios_store() -> std::result::Result<(), String> {
+    use std::sync::{Mutex, Once};
+
+    static ONCE: Once = Once::new();
+    static FAILURE: Mutex<Option<String>> = Mutex::new(None);
+
+    ONCE.call_once(|| match apple_native_keyring_store::protected::Store::new() {
+        Ok(store) => keyring_core::set_default_store(store),
+        Err(e) => *FAILURE.lock().unwrap() = Some(e.to_string()),
+    });
+
+    match FAILURE.lock().unwrap().clone() {
+        None => Ok(()),
+        Some(e) => Err(e),
+    }
+}
+
+fn keyring_entry(user_id: &str) -> Option<KeychainEntry> {
+    #[cfg(target_os = "ios")]
+    if let Err(e) = install_ios_store() {
+        tracing::warn!("no usable keychain ({e}); falling back to file storage");
+        return None;
+    }
+
+    match KeychainEntry::new(KEYRING_SERVICE, user_id) {
         Ok(entry) => Some(entry),
         Err(e) => {
             tracing::warn!("no usable keychain ({e}); falling back to file storage");

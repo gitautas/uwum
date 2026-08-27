@@ -6,7 +6,9 @@ import * as ipc from "../lib/ipc";
 import { emoteLookup, emoteRefs, matchEmotes, typingShortcode } from "../lib/packs";
 import type { EventItem, PackImage } from "../lib/types";
 import { uploadFiles, uploadPaths } from "../lib/upload";
+import { useIsMobile } from "../lib/viewport";
 import { selectDraft, useStore } from "../store";
+import { AttachSheet } from "./AttachSheet";
 import { EmojiPicker } from "./EmojiPicker";
 import { Icon } from "./ui";
 
@@ -25,6 +27,11 @@ export function Composer({
   encrypted: boolean;
 }) {
   const key = threadRoot ? `${roomId}|${threadRoot}` : roomId;
+  const isMobile = useIsMobile();
+  /** Hidden inputs, opened only from the attach sheet — see `attach`. */
+  const fileInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
 
   const { draft, setDraft, clearDraft, showBanner, settings, packs } = useStore(
     useShallow((s) => ({
@@ -51,9 +58,14 @@ export function Composer({
   } | null>(null);
 
   // Focus the composer when the room changes — you almost always want to type.
+  //
+  // Except on a phone, where focusing raises the keyboard, and the keyboard
+  // covers half of what you opened the room to read. Opening a room there is
+  // usually "catch up", not "reply"; tapping the composer says otherwise.
   useEffect(() => {
+    if (isMobile) return;
     input.current?.focus();
-  }, [key]);
+  }, [key, isMobile]);
 
   // Stop advertising "typing" when leaving the room, otherwise the indicator
   // sticks for everyone else until the server times it out.
@@ -219,7 +231,30 @@ export function Composer({
     }
   }
 
+  /**
+   * Attach something.
+   *
+   * On desktop this is the OS file dialog, which is what you want when the
+   * thing you're sending is a file you can point at.
+   *
+   * On a phone it isn't: what you're sending is nearly always a photo you just
+   * took, and a document browser is the long way round to it. A plain
+   * `<input type="file">` in a web view *is* the native iOS sheet — Photo
+   * Library, Take Photo or Video, Choose File — so the platform already has the
+   * flow we want, and we only have to stop overriding it.
+   *
+   * `accept` is deliberately unset: iOS offers the photo and camera options
+   * regardless, and filtering to `image/*,video/*` would take away the ability
+   * to send any other kind of file from a phone at all.
+   */
   async function attach() {
+    // On a phone the sheet comes first: it shows the recent library inline, and
+    // offers the camera and the file picker under it. Desktop has no library to
+    // read and a perfectly good file dialog, so it goes straight there.
+    if (isMobile) {
+      setAttachOpen(true);
+      return;
+    }
     try {
       const selected = await open({ multiple: true });
       const paths = typeof selected === "string" ? [selected] : (selected ?? []);
@@ -227,6 +262,19 @@ export function Composer({
     } catch (e) {
       showBanner("error", ipc.asUwuError(e).message);
     }
+  }
+
+  /**
+   * The picked files arrive as bytes rather than paths — the web view holds
+   * them, not the filesystem — which is the same shape a paste arrives in, so
+   * it takes the same route.
+   */
+  function onPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    // Clear it, or picking the same photo twice in a row fires no change event
+    // the second time and looks like the app ignored you.
+    e.target.value = "";
+    if (files.length) void uploadFiles(files, roomId, threadRoot);
   }
 
   // Paste a screenshot, an image, any file — it goes to this room.
@@ -249,7 +297,16 @@ export function Composer({
   }, [roomId, threadRoot]);
 
   return (
-    <div style={{ position: "relative", padding: "12px 22px 18px" }}>
+    // The safe-area inset is zero on desktop, so this is a no-op there and
+    // keeps the composer clear of the home indicator on a phone.
+    <div
+      style={{
+        position: "relative",
+        padding: isMobile
+          ? "10px 14px calc(var(--safe-bottom) + 8px)"
+          : "12px 22px 18px",
+      }}
+    >
       {completing && (
         <ShortcodeMenu
           matches={completing.matches}
@@ -320,6 +377,47 @@ export function Composer({
           boxShadow: "var(--shadow-card)",
         }}
       >
+        {/* Opened only by the button beside it. Rendered on every platform but
+            used on none except touch, where it is the whole point — see
+            `attach`. */}
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          onChange={onPicked}
+          style={{ display: "none" }}
+          aria-hidden
+          tabIndex={-1}
+        />
+        {/* `capture` is what turns the same element into the camera rather than
+            a picker, so "take a photo" opens the camera and nothing else. */}
+        <input
+          ref={cameraInput}
+          type="file"
+          accept="image/*,video/*"
+          capture="environment"
+          onChange={onPicked}
+          style={{ display: "none" }}
+          aria-hidden
+          tabIndex={-1}
+        />
+
+        {attachOpen && (
+          <AttachSheet
+            roomId={roomId}
+            threadRoot={threadRoot}
+            onClose={() => setAttachOpen(false)}
+            onCamera={() => {
+              setAttachOpen(false);
+              cameraInput.current?.click();
+            }}
+            onBrowse={() => {
+              setAttachOpen(false);
+              fileInput.current?.click();
+            }}
+          />
+        )}
+
         {/* Same 38px box as the send button, so both line up on the composer's
             baseline however tall the textarea has grown. */}
         <button
@@ -459,6 +557,20 @@ export function Composer({
 
           <button
             onClick={() => void submit()}
+            // Keep the caret — and therefore the keyboard — in the composer.
+            //
+            // Pressing a button moves focus to it, and iOS drops the keyboard
+            // the instant focus leaves a text field. Sending a message is
+            // rarely the last thing you do, so losing the keyboard on every
+            // send means reopening it for the next line. Blocking the default
+            // on press keeps focus where it is; the click still fires.
+            //
+            // The shortcode menu does the same thing for the same reason.
+            // Both events: WebKit is not consistent about whether blocking
+            // `pointerdown` also suppresses the compatibility mouse event that
+            // moves focus.
+            onPointerDown={(e) => e.preventDefault()}
+            onMouseDown={(e) => e.preventDefault()}
             disabled={!draft.body.trim()}
             title="send"
             style={{
@@ -490,32 +602,32 @@ export function Composer({
         </div>
       </div>
 
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 8,
-          padding: "0 6px",
-        }}
-      >
-        <Icon
-          name={encrypted ? "lock-key" : "lock-key-open"}
-          size={11}
-          color={encrypted ? "var(--accent-primary)" : "var(--status-warning)"}
-        />
-        <span
+      {/* Only the bad news. That a room is encrypted is already said by the
+          lock in the header, and repeating it under every composer spends a
+          line on the expected case — which also trains people to stop reading
+          the line, exactly where the *unencrypted* warning has to land. */}
+      {!encrypted && (
+        <div
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10.5,
-            color: "var(--text-tertiary)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginTop: 8,
+            padding: "0 6px",
           }}
         >
-          {encrypted
-            ? "encrypted end-to-end · only people in this room can read it"
-            : "not encrypted · your homeserver can read this"}
-        </span>
-      </div>
+          <Icon name="lock-key-open" size={11} color="var(--status-warning)" />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10.5,
+              color: "var(--text-tertiary)",
+            }}
+          >
+            not encrypted · your homeserver can read this
+          </span>
+        </div>
+      )}
     </div>
   );
 }
