@@ -57,6 +57,19 @@ mime = "0.3"
 mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# rustls 0.23 picks its crypto backend from crate features, and refuses to
+# guess when more than one is on. Ours has both: `hyper-rustls` asks for
+# `aws-lc-rs`, something else in the graph asks for `ring`, and the two unify
+# into an ambiguity that makes `from_crate_features` return `None` — a panic on
+# the first TLS handshake, inside whichever worker thread got there first.
+#
+# Desktop never noticed. `matrix-sdk` enables reqwest's `default-tls`, so on
+# macOS and Windows reqwest reaches for the system stack and rustls is compiled
+# but never used. Android has no such stack, so it falls through to rustls and
+# every HTTPS request panicked. The direct dependency exists purely so `run`
+# can name a provider and settle it (see `install_crypto_provider`).
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] }
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2"
 

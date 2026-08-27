@@ -7,10 +7,24 @@ system. Tauri 2 + Rust backend, React + TypeScript frontend.
 npm install
 npm run app          # dev, with hot reload
 npm run app:build    # release .app / .dmg
+
+npm run android         # dev build on a connected device
+npm run android:build   # release .apk / .aab
 ```
 
-macOS builds today. Linux and Windows are kept viable — no macOS-only crates,
-and both custom-protocol URL forms are handled — but neither is tested yet.
+macOS and iOS build today, and Android runs on a device. Linux and Windows are
+kept viable — no macOS-only crates, and both custom-protocol URL forms are
+handled — but neither is tested yet.
+
+Android needs an SDK, an NDK and a JDK. `npm run android` finds all three
+itself if they are installed; from nothing, that is:
+
+```bash
+brew install --cask android-commandlinetools temurin
+sdkmanager --licenses
+sdkmanager platform-tools "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.13750724"
+rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
+```
 
 ## What works
 

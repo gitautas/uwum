@@ -11,6 +11,8 @@
     "tauri": "tauri",
     "app": "tauri dev",
     "app:build": "tauri build",
+    "android": "node scripts/android.mjs dev",
+    "android:build": "node scripts/android.mjs build",
     "test": "vitest run",
     "test:watch": "vitest",
     "release:patch": "node scripts/release.mjs patch",
