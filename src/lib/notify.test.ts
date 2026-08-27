@@ -26,6 +26,24 @@ vi.mock("./sounds", () => ({
   playCallSound: (id: string, volume: number) => playCallSound(id, volume),
 }));
 
+/**
+ * The call we are currently in. `notify` reads this from the controller rather
+ * than from the store — the store field it used to read was never assigned by
+ * anything, so this test passed while the real app notified you about your own
+ * calls.
+ */
+const currentCall: { roomId: string | null; status: string } = {
+  roomId: null,
+  status: "idle",
+};
+
+vi.mock("./call", () => ({
+  call: {
+    getState: () => currentCall,
+    subscribe: () => () => {},
+  },
+}));
+
 const { startNotifications } = await import("./notify");
 const { useStore } = await import("../store");
 
@@ -73,7 +91,9 @@ describe("notifications", () => {
     // Unfocused by default: the interesting cases are the ones where the user
     // isn't already looking at the room.
     vi.spyOn(document, "hasFocus").mockReturnValue(false);
-    useStore.setState({ rooms: [], activeRoomId: null, callRoomId: null });
+    currentCall.roomId = null;
+    currentCall.status = "idle";
+    useStore.setState({ rooms: [], activeRoomId: null, incomingCall: null });
     stop = startNotifications();
   });
 
@@ -137,12 +157,50 @@ describe("notifications", () => {
   });
 
   it("doesn't ring for the call you're already in", () => {
-    useStore.setState({ callRoomId: "!a" });
+    currentCall.roomId = "!a";
+    currentCall.status = "connected";
     push([room({ id: "!a" })]);
     push([room({ id: "!a", hasActiveCall: true })]);
 
     expect(sendNotification).not.toHaveBeenCalled();
     expect(playCallSound).not.toHaveBeenCalled();
+  });
+
+  it("rings a DM until it is answered, rather than chirping once", () => {
+    push([room({ id: "!a", name: "kai", isDirect: true })]);
+    push([room({ id: "!a", name: "kai", isDirect: true, hasActiveCall: true })]);
+
+    expect(useStore.getState().incomingCall?.roomId).toBe("!a");
+    // The sustained ring replaces the one-shot chirp; playing both would
+    // double up on the first ring.
+    expect(playCallSound).not.toHaveBeenCalled();
+    expect(sendNotification.mock.calls[0][0]).toMatchObject({ body: "calling~" });
+  });
+
+  it("does not ring a group call", () => {
+    push([room({ id: "!a", name: "hangout" })]);
+    push([room({ id: "!a", name: "hangout", hasActiveCall: true })]);
+
+    expect(useStore.getState().incomingCall).toBeNull();
+    expect(playCallSound).toHaveBeenCalledOnce();
+  });
+
+  it("stops ringing when the caller gives up", () => {
+    push([room({ id: "!a", isDirect: true })]);
+    push([room({ id: "!a", isDirect: true, hasActiveCall: true })]);
+    expect(useStore.getState().incomingCall?.roomId).toBe("!a");
+
+    push([room({ id: "!a", isDirect: true, hasActiveCall: false })]);
+    expect(useStore.getState().incomingCall).toBeNull();
+  });
+
+  it("does not ring for a DM call you started yourself", () => {
+    currentCall.roomId = "!a";
+    currentCall.status = "connected";
+    push([room({ id: "!a", isDirect: true })]);
+    push([room({ id: "!a", isDirect: true, hasActiveCall: true })]);
+
+    expect(useStore.getState().incomingCall).toBeNull();
   });
 
   it("announces an invite once", () => {

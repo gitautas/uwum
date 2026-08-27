@@ -129,7 +129,12 @@ interface State {
   sasState: SasStateInfo | null;
 
   // calls
-  callRoomId: string | null;
+  /**
+   * A DM whose call is ringing at us right now, and when it started ringing.
+   * Group calls never land here — they get a banner and a single chirp, the
+   * way they always have; a room of forty people all ringing is not a feature.
+   */
+  incomingCall: { roomId: string; since: number } | null;
 
   // toasts / errors
   banner: { tone: "error" | "info"; message: string } | null;
@@ -181,7 +186,10 @@ interface Actions {
   setSyncStatus(status: SyncStatus): void;
   setVerificationRequest(request: VerificationRequestInfo | null): void;
   applyVerificationUpdate(update: VerificationRequestInfo | SasStateInfo): void;
-  setCallRoom(roomId: string | null): void;
+  /** Start ringing for a DM call. Ignored if something is already ringing. */
+  ringIncomingCall(roomId: string): void;
+  /** Stop ringing — for one room, or unconditionally when `roomId` is omitted. */
+  stopIncomingCall(roomId?: string): void;
   showBanner(tone: "error" | "info", message: string): void;
   dismissBanner(): void;
   reset(): void;
@@ -216,7 +224,7 @@ const initial: State = {
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
-  callRoomId: null,
+  incomingCall: null,
   banner: null,
 };
 
@@ -491,7 +499,23 @@ export const useStore = create<State & Actions>((set, get) => ({
       return { verificationRequest: update };
     }),
 
-  setCallRoom: (callRoomId) => set({ callRoomId }),
+  ringIncomingCall: (roomId) =>
+    set((s) => {
+      // The first ring wins. A second DM calling while one is already ringing
+      // must not silently swap the room behind the answer button — the same
+      // way a second verification request does not displace a running one.
+      if (s.incomingCall) return {};
+      return { incomingCall: { roomId, since: Date.now() } };
+    }),
+
+  stopIncomingCall: (roomId) =>
+    set((s) => {
+      // Addressed by room, so a call ending somewhere else cannot silence the
+      // one the user is being asked about.
+      if (!s.incomingCall) return {};
+      if (roomId && s.incomingCall.roomId !== roomId) return {};
+      return { incomingCall: null };
+    }),
 
   showBanner: (tone, message) => set({ banner: { tone, message } }),
   dismissBanner: () => set({ banner: null }),

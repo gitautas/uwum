@@ -4,6 +4,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "./lib/ipc";
 import { startNotifications } from "./lib/notify";
+import { startRinger } from "./lib/ringer";
 import { resetPresence } from "./lib/presence";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import type { RoomSummary } from "./lib/types";
@@ -19,6 +20,7 @@ import { RoomInfo } from "./components/RoomInfo";
 import { RoomList } from "./components/RoomList";
 import { SettingsView } from "./components/SettingsView";
 import { SpacesRail } from "./components/SpacesRail";
+import { IncomingCallModal } from "./components/IncomingCallModal";
 import { VerificationModal } from "./components/VerificationModal";
 import { BackdropPattern, dragRegion, Icon, Spinner } from "./components/ui";
 
@@ -159,6 +161,7 @@ function Shell() {
       <DropZone />
       <Lightbox />
       <CreateRoom />
+      <IncomingCallModal />
       <VerificationModal />
       <SyncIndicator />
 
@@ -367,6 +370,7 @@ function useAppShortcuts() {
  */
 function useNotifications() {
   useEffect(() => startNotifications(), []);
+  useEffect(() => startRinger(), []);
 }
 
 /**
