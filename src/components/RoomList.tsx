@@ -11,7 +11,7 @@ import {
   type RoomFilter,
 } from "../store";
 import { PresenceDot } from "./Presence";
-import { Avatar, Button, ChannelBadge, HoverRow, Icon } from "./ui";
+import { Avatar, Button, ChannelBadge, dragOff, dragRegion, HoverRow, Icon } from "./ui";
 
 const FILTERS: RoomFilter[] = ["all", "unread", "dms", "muted"];
 
@@ -80,7 +80,7 @@ export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
       }}
     >
       <div
-        className="uwu-drag"
+        {...dragRegion(!onOpenSpaces)}
         style={{
           padding: onOpenSpaces
             ? "calc(var(--safe-top) + 12px) 14px 12px"
@@ -101,7 +101,7 @@ export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
             <button
               onClick={onOpenSpaces}
               aria-label="spaces"
-              className="uwu-no-drag"
+              {...dragOff}
               style={{
                 flex: "none",
                 width: 44,
@@ -129,7 +129,7 @@ export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
             {heading}~
           </div>
           <div
-            className="uwu-no-drag"
+            {...dragOff}
             style={{ display: "flex", alignItems: "center", gap: 10 }}
           >
             <span
@@ -172,7 +172,7 @@ export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
         </div>
 
         <div
-          className="uwu-no-drag"
+          {...dragOff}
           style={{
             marginTop: 12,
             display: "flex",
@@ -244,7 +244,7 @@ export function RoomList({ onOpenSpaces }: { onOpenSpaces?: () => void } = {}) {
 
         {filtersOpen && (
           <div
-            className="uwu-no-drag"
+            {...dragOff}
             style={{ display: "flex", gap: 6, marginTop: 12 }}
           >
             {FILTERS.map((f) => (

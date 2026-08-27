@@ -2,13 +2,15 @@ import { useState } from "react";
 
 import * as ipc from "../lib/ipc";
 import type { HomeserverInfo } from "../lib/types";
+import { useIsMobile } from "../lib/viewport";
 import { useStore } from "../store";
-import { BackdropPattern, Button, Icon, RaveLabel, Spinner } from "./ui";
+import { BackdropPattern, Button, dragRegion, Icon, RaveLabel, Spinner } from "./ui";
 
 type Stage = "server" | "credentials";
 
 export function LoginScreen() {
   const setSession = useStore((s) => s.setSession);
+  const isMobile = useIsMobile();
 
   const [stage, setStage] = useState<Stage>("server");
   const [server, setServer] = useState("matrix.org");
@@ -71,7 +73,7 @@ export function LoginScreen() {
       <BackdropPattern />
       {/* The drag strip keeps the frameless window movable on macOS. */}
       <div
-        className="uwu-drag"
+        {...dragRegion(!isMobile)}
         style={{ position: "absolute", top: 0, left: 0, right: 0, height: 32 }}
       />
 

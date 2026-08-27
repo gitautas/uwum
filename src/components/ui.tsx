@@ -7,6 +7,26 @@ import type { CSSProperties, ReactNode } from "react";
 import { accentFor, initialsFor } from "../lib/display";
 import { mediaUrl } from "../lib/ipc";
 
+/**
+ * The window has no title bar on macOS, so parts of the chrome double as its
+ * drag handle.
+ *
+ * `-webkit-app-region` — what the `uwu-drag` class sets — is a Chromium
+ * property, and WKWebView ignores it, so on macOS it drags nothing. Tauri
+ * reads this data attribute on mousedown instead. `deep` means anywhere in the
+ * subtree drags; Tauri's own handler still lets buttons, links and inputs
+ * through, and `dragOff` opts the rest of a subtree back out.
+ *
+ * Desktop only: iOS synthesises a mousedown from a tap, and the handler calls
+ * `preventDefault` on it, which swallows the tap that would have followed.
+ */
+export function dragRegion(desktop: boolean) {
+  return desktop ? ({ className: "uwu-drag", "data-tauri-drag-region": "deep" } as const) : {};
+}
+
+/** Opts a subtree out of an enclosing {@link dragRegion}. */
+export const dragOff = { className: "uwu-no-drag", "data-tauri-drag-region": "false" } as const;
+
 export function Icon({
   name,
   size = 16,

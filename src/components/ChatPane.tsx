@@ -11,7 +11,7 @@ import { CallStage } from "./CallStage";
 import { Composer } from "./Composer";
 import { TimelineView } from "./TimelineView";
 import { VerifyBanner } from "./VerificationModal";
-import { Avatar, ChannelBadge, Icon } from "./ui";
+import { Avatar, ChannelBadge, dragOff, dragRegion, Icon } from "./ui";
 
 /**
  * `onBack` is supplied only by the mobile shell, where this pane is the whole
@@ -63,7 +63,7 @@ export function ChatPane({ room, onBack }: { room: RoomSummary; onBack?: () => v
       }}
     >
       <div
-        className="uwu-drag"
+        {...dragRegion(!onBack)}
         style={{
           display: "flex",
           alignItems: "center",
@@ -190,7 +190,7 @@ export function ChatPane({ room, onBack }: { room: RoomSummary; onBack?: () => v
         </div>
 
         <div
-          className="uwu-no-drag"
+          {...dragOff}
           style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}
         >
           {!onBack && (

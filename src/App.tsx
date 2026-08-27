@@ -20,7 +20,7 @@ import { RoomList } from "./components/RoomList";
 import { SettingsView } from "./components/SettingsView";
 import { SpacesRail } from "./components/SpacesRail";
 import { VerificationModal } from "./components/VerificationModal";
-import { BackdropPattern, Icon, Spinner } from "./components/ui";
+import { BackdropPattern, dragRegion, Icon, Spinner } from "./components/ui";
 
 export default function App() {
   const { session, bootstrapped, setSession, setBootstrapped, showBanner } = useStore(
@@ -201,7 +201,7 @@ function Shell() {
           There is no title bar to drag on a phone. */}
       {activeRoomId === null && !isMobile && (
         <div
-          className="uwu-drag"
+          {...dragRegion(true)}
           style={{ position: "absolute", top: 0, left: 76, right: 0, height: 28 }}
         />
       )}
