@@ -2,6 +2,27 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!--
+      Voice calls. WebRTC runs in the WebView, and wry's `onPermissionRequest`
+      already asks Android for these the first time `getUserMedia` is called —
+      but a runtime permission that is not declared here is refused outright,
+      with no dialog shown. The symptom is a bare `NotAllowedError: Permission
+      denied` the instant a call starts, which reads like the user said no.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Video rooms; a voice-only call never triggers the camera request. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!--
+      Declared, but not required: a device with no microphone should still be
+      able to install this and read messages. Without these, Play filters the
+      app off such devices entirely, because a `uses-permission` for hardware
+      implies `uses-feature` unless it is said otherwise here.
+    -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
