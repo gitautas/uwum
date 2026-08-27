@@ -23,6 +23,7 @@ import type {
   PackTarget,
   Presence,
   PresenceUpdate,
+  RecentPhotos,
   RecoveryStatus,
   RoomMember,
   RoomPermissions,
@@ -482,3 +483,21 @@ export const onVerificationUpdate = (
   listen<VerificationRequestInfo | SasStateInfo>("matrix://verification-update", (e) =>
     fn(e.payload),
   );
+
+/**
+ * The newest photos and videos on the device, with thumbnails.
+ *
+ * iOS only — everywhere else this answers `supported: false` rather than
+ * failing, so the caller can fall back to the file picker without a try/catch
+ * around ordinary platform differences.
+ */
+export const photosRecent = (limit: number) =>
+  invoke<RecentPhotos>("photos_recent", { limit });
+
+/**
+ * Copy one library item to a temp file and return its path.
+ *
+ * A path, not bytes: it rejoins the same upload route the file picker and
+ * drag-and-drop already use.
+ */
+export const photosExport = (id: string) => invoke<string>("photos_export", { id });

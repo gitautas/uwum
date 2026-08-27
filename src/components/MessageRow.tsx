@@ -15,6 +15,7 @@ import { saveAttachment } from "../lib/download";
 import { imageLookup, reactionImage, reactionKeyFor } from "../lib/packs";
 import { linkify, renderFormattedBody } from "../lib/richText";
 import type { Content, EventItem, MediaInfo, PackImage } from "../lib/types";
+import { useIsMobile, useLongPress } from "../lib/viewport";
 import { useStore } from "../store";
 import { EmojiPicker } from "./EmojiPicker";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
@@ -22,6 +23,7 @@ import { Icon, Spinner } from "./ui";
 
 export function MessageRow({
   item,
+  rowId,
   roomId,
   threadRoot,
   showHeader,
@@ -29,6 +31,8 @@ export function MessageRow({
   onOpenThread,
 }: {
   item: EventItem;
+  /** The timeline row's stable id, which the scroll anchor finds it by. */
+  rowId: string;
   roomId: string;
   threadRoot?: string;
   /** False when this message continues a run from the same author. */
@@ -49,11 +53,70 @@ export function MessageRow({
   // somebody else sent, and they may have reacted with anything.
   const emotes = useMemo(() => imageLookup(packs), [packs]);
   const senderAnchor = useProfileAnchor(item.sender);
+  const isMobile = useIsMobile();
+  /** The touch action sheet, which stands in for the hover bar. */
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const longPress = useLongPress(
+    isMobile && item.eventId ? () => setSheetOpen(true) : undefined,
+  );
 
   const author = displayNameFor(item.sender, item.senderName);
   const accent = accentFor(item.sender);
   const pending = item.sendState?.status === "notSentYet";
   const failed = item.sendState?.status === "failed";
+
+  /**
+   * Everything you can do to a message, in one list.
+   *
+   * The hover bar and the touch sheet are two presentations of the same set —
+   * keeping them as one array is what stops a new action from being added to
+   * the pointer surface and quietly missing from the touch one.
+   */
+  function messageActions(): RowAction[] {
+    const list: RowAction[] = [];
+    if (item.canReply) {
+      list.push({
+        icon: "arrow-bend-up-left",
+        label: "reply",
+        run: () => onReply(item.eventId!),
+      });
+    }
+    list.push({
+      icon: "chats-circle",
+      label: "reply in thread",
+      run: () => onOpenThread(item.threadRoot ?? item.eventId!),
+    });
+    list.push({
+      icon: "copy",
+      label: "copy text",
+      // Desktop already has this: select the text and press ⌘C. Long-press on
+      // a phone is where that affordance went, so the sheet has to offer it.
+      touchOnly: true,
+      run: () => {
+        navigator.clipboard
+          .writeText(plainBody(item.content))
+          .catch(() => showBanner("error", "couldn't copy that"));
+      },
+    });
+    if (item.isEditable) {
+      list.push({
+        icon: "pencil-simple",
+        label: "edit",
+        run: () => {
+          const key = threadRoot ? `${roomId}|${threadRoot}` : roomId;
+          setDraft(key, {
+            editing: item.eventId,
+            body: plainBody(item.content),
+            replyTo: null,
+          });
+        },
+      });
+    }
+    if (item.isOwn) {
+      list.push({ icon: "trash", label: "delete", danger: true, run: () => void remove() });
+    }
+    return list;
+  }
 
   async function react(key: string) {
     if (!item.eventId) return;
@@ -103,8 +166,11 @@ export function MessageRow({
 
   return (
     <div
+      className="uwu-msg"
+      data-row-id={rowId}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      {...longPress}
       style={{
         position: "relative",
         display: "flex",
@@ -217,11 +283,16 @@ export function MessageRow({
               borderRadius: 12,
               background: "rgba(255,255,255,.04)",
               borderLeft: "2px solid var(--accent-tertiary)",
-              maxWidth: 520,
+              maxWidth: "min(520px, 100%)",
             }}
           >
             <Icon name="arrow-bend-up-left" size={12} color="var(--accent-tertiary)" />
-            <span className="uwu-ellipsis" style={{ fontSize: 12, color: "var(--text-secondary)" }}>
+            <span
+              className="uwu-ellipsis"
+              // Without this the nowrap text reports its full width as the
+              // row's minimum and pushes the message list off-screen.
+              style={{ minWidth: 0, fontSize: 12, color: "var(--text-secondary)" }}
+            >
               {item.reply.senderName ??
                 (item.reply.sender ? localpart(item.reply.sender) : "someone")}
               : {item.reply.body ?? "…"}
@@ -345,8 +416,11 @@ export function MessageRow({
       )}
 
       {/* The bar stays up while the picker is open, so the thing it's attached
-          to doesn't vanish from under it when the pointer leaves the row. */}
-      {(hovered || pickerAnchor) && item.eventId && (
+          to doesn't vanish from under it when the pointer leaves the row.
+          Never on touch: WKWebView synthesises `mouseenter` on tap, so this
+          would flash up on every tap — and the long-press sheet is where these
+          actions live there. */}
+      {!isMobile && (hovered || pickerAnchor) && item.eventId && (
         <div
           style={{
             position: "absolute",
@@ -413,36 +487,29 @@ export function MessageRow({
               )
             }
           />
-          {item.canReply && (
-            <ActionButton
-              icon="arrow-bend-up-left"
-              title="reply"
-              onClick={() => onReply(item.eventId!)}
-            />
-          )}
-          <ActionButton
-            icon="chats-circle"
-            title="reply in thread"
-            onClick={() => onOpenThread(item.threadRoot ?? item.eventId!)}
-          />
-          {item.isEditable && (
-            <ActionButton
-              icon="pencil-simple"
-              title="edit"
-              onClick={() => {
-                const key = threadRoot ? `${roomId}|${threadRoot}` : roomId;
-                setDraft(key, {
-                  editing: item.eventId,
-                  body: plainBody(item.content),
-                  replyTo: null,
-                });
-              }}
-            />
-          )}
-          {item.isOwn && (
-            <ActionButton icon="trash" title="delete" onClick={() => void remove()} danger />
-          )}
+          {messageActions()
+            .filter((action) => !action.touchOnly)
+            .map((action) => (
+              <ActionButton
+                key={action.label}
+                icon={action.icon}
+                title={action.label}
+                onClick={action.run}
+                danger={action.danger}
+              />
+            ))}
         </div>
+      )}
+
+      {sheetOpen && item.eventId && (
+        <MessageActionSheet
+          actions={messageActions()}
+          quick={recentReactions}
+          emotes={emotes}
+          onReact={(key) => void react(key)}
+          onPickMore={(rect) => setPickerAnchor(rect)}
+          onClose={() => setSheetOpen(false)}
+        />
       )}
 
       {pickerAnchor && (
@@ -453,6 +520,153 @@ export function MessageRow({
           onClose={() => setPickerAnchor(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** One thing you can do to a message, drawn by both the hover bar and the sheet. */
+type RowAction = {
+  icon: string;
+  label: string;
+  run: () => void;
+  danger?: boolean;
+  /** Only offered on touch, where the pointer equivalent is unreachable. */
+  touchOnly?: boolean;
+};
+
+/**
+ * The touch equivalent of the hover bar: a sheet up from the bottom edge.
+ *
+ * Bottom-anchored rather than drawn at the message, because the message may be
+ * anywhere on screen including under a thumb, and because the bottom of the
+ * screen is the part of a phone a thumb actually reaches.
+ */
+function MessageActionSheet({
+  actions,
+  quick,
+  emotes,
+  onReact,
+  onPickMore,
+  onClose,
+}: {
+  actions: RowAction[];
+  quick: string[];
+  emotes: ReturnType<typeof imageLookup>;
+  onReact: (key: string) => void;
+  onPickMore: (anchor: DOMRect) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 140,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "flex-end",
+        background: "rgba(0,0,0,.5)",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--surface-card-raised)",
+          borderTop: "1px solid var(--border-default)",
+          borderTopLeftRadius: 22,
+          borderTopRightRadius: 22,
+          padding: "10px 10px calc(var(--safe-bottom) + 10px)",
+          boxShadow: "var(--shadow-pop)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "6px 4px 10px",
+            borderBottom: "1px solid var(--border-subtle)",
+            marginBottom: 6,
+          }}
+        >
+          {quick.map((key) => (
+            <button
+              key={key}
+              onClick={() => {
+                onReact(key);
+                onClose();
+              }}
+              aria-label={`react with ${key}`}
+              style={{
+                flex: 1,
+                height: 44,
+                borderRadius: 12,
+                fontSize: 22,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+              }}
+            >
+              <ReactionKey label={key} emotes={emotes} size={22} />
+            </button>
+          ))}
+          <button
+            onClick={(e) => {
+              onPickMore(e.currentTarget.getBoundingClientRect());
+              onClose();
+            }}
+            aria-label="more reactions"
+            style={{
+              flex: "none",
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              background: "var(--surface-card)",
+            }}
+          >
+            <Icon name="smiley" size={20} color="var(--text-secondary)" />
+          </button>
+        </div>
+
+        {actions.map((action) => (
+          <button
+            key={action.label}
+            onClick={() => {
+              action.run();
+              onClose();
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              width: "100%",
+              height: 48,
+              padding: "0 12px",
+              borderRadius: 14,
+              cursor: "pointer",
+              textAlign: "left",
+              fontFamily: "var(--font-display)",
+              fontWeight: 700,
+              fontSize: 15,
+              color: action.danger ? "var(--status-danger)" : "var(--text-primary)",
+            }}
+          >
+            <Icon
+              name={action.icon}
+              size={18}
+              color={action.danger ? "var(--status-danger)" : "var(--text-secondary)"}
+            />
+            {action.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -542,10 +756,16 @@ function ContentBody({ content, emojiOnly }: { content: Content; emojiOnly: bool
     fontSize: emojiOnly ? 34 : 14.5,
     lineHeight: emojiOnly ? 1.2 : 1.55,
     color: "var(--text-primary)",
-    maxWidth: 640,
+    maxWidth: "min(640px, 100%)",
     textWrap: "pretty" as const,
     whiteSpace: "pre-wrap" as const,
-    wordBreak: "break-word" as const,
+    // `anywhere`, not `break-word`. Both wrap a long URL once a width is
+    // settled, but only `anywhere` also shrinks the element's *min-content*
+    // width. With `break-word` the row still reports the whole unbroken URL as
+    // its minimum, every flex ancestor sizes to that, and the message list ends
+    // up wider than the screen — which on a phone is a horizontal scrollbar and
+    // a timeline shifted off its left edge.
+    overflowWrap: "anywhere" as const,
   };
 
   switch (content.kind) {
@@ -746,8 +966,15 @@ function ImageBody({
       style={{
         cursor: media.mxc ? "zoom-in" : "default",
         marginTop: 4,
+        // `width` is the size we *want*; on a narrow screen the column beside
+        // the avatar is smaller than that, and a fixed pixel width there makes
+        // the whole message list wider than the phone. Cap it, and let
+        // `aspect-ratio` recompute the height so the no-jump property survives
+        // — a fixed `height` with a shrinking width would just crop instead.
         width,
-        height,
+        maxWidth: "100%",
+        height: "auto",
+        aspectRatio: `${Math.round(width)} / ${Math.round(height)}`,
         objectFit: "cover",
         borderRadius: sticker ? 8 : 16,
         border: sticker ? "none" : "1px solid var(--border-subtle)",
@@ -762,7 +989,7 @@ function VideoBody({ body, media }: { body: string; media: MediaInfo }) {
 
   const frame: React.CSSProperties = {
     marginTop: 4,
-    maxWidth: 400,
+    maxWidth: "min(400px, 100%)",
     maxHeight: 320,
     borderRadius: 16,
     border: "1px solid var(--border-subtle)",
@@ -784,7 +1011,7 @@ function VideoBody({ body, media }: { body: string; media: MediaInfo }) {
       <div
         style={{
           ...frame,
-          width: 320,
+          width: "min(320px, 100%)",
           height: 180,
           display: "flex",
           alignItems: "center",
@@ -813,7 +1040,7 @@ function AudioBody({ body, media }: { body: string; media: MediaInfo }) {
         borderRadius: 16,
         background: "var(--surface-card)",
         border: "1px solid var(--border-subtle)",
-        maxWidth: 340,
+        maxWidth: "min(340px, 100%)",
       }}
     >
       <Icon
@@ -872,7 +1099,7 @@ function FileBody({ body, media }: { body: string; media: MediaInfo }) {
         borderRadius: 16,
         background: "var(--surface-card)",
         border: "1px solid var(--border-subtle)",
-        maxWidth: 360,
+        maxWidth: "min(360px, 100%)",
         textAlign: "left",
         cursor: mxc ? "pointer" : "default",
       }}

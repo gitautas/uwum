@@ -3,6 +3,7 @@ mod dto;
 mod error;
 mod events;
 mod matrix;
+mod photos;
 mod rtc;
 mod verification;
 
@@ -101,8 +102,15 @@ pub fn run() {
             commands::refresh_call_membership,
             commands::get_call_participants,
             commands::get_active_calls,
+            // photos
+            photos::photos_recent,
+            photos::photos_export,
         ])
         .setup(|app| {
+            // Read only by the platform-gated calls below; on iOS/Android
+            // neither applies and the binding would otherwise look unused.
+            let _ = &app;
+            #[cfg(desktop)]
             install_settings_menu_item(app.handle())?;
             #[cfg(target_os = "linux")]
             enable_webrtc(app)?;
@@ -135,6 +143,10 @@ pub fn run() {
 ///
 /// The frontend keeps its own `ctrl+,` handler for Windows and Linux, where the
 /// menu bar isn't in the way.
+///
+/// Desktop only: `tauri::menu` is `#[cfg(desktop)]`, and a phone has neither a
+/// menu bar nor a shortcut to claim.
+#[cfg(desktop)]
 fn install_settings_menu_item(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 

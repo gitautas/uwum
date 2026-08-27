@@ -9,8 +9,15 @@ import { Icon, PresenceDot } from "./ui";
 /**
  * The narrow left rail: the uwu mark, one tile per space, and your own avatar
  * pinned to the bottom.
+ *
+ * `asDrawer` is set only by the mobile shell, where the rail slides over the
+ * room list instead of standing beside it permanently. See `ChatPane` for why
+ * the mobile props double as the layout switch.
  */
-export function SpacesRail() {
+export function SpacesRail({
+  asDrawer,
+  onClose,
+}: { asDrawer?: boolean; onClose?: () => void } = {}) {
   const { spaces, activeSpaceId, session, setActiveSpace, openSettings } = useStore(
     useShallow((s) => ({
       spaces: s.spaces,
@@ -21,8 +28,17 @@ export function SpacesRail() {
     })),
   );
 
-  return (
+  // Choosing a space is the drawer's whole purpose, so it dismisses on the way
+  // out. On desktop `onClose` is undefined and this is just `setActiveSpace`.
+  function chooseSpace(id: string | null) {
+    setActiveSpace(id);
+    onClose?.();
+  }
+
+  const rail = (
     <div
+      // Only meaningful as a drawer, where the scrim behind it closes on click.
+      onClick={asDrawer ? (e) => e.stopPropagation() : undefined}
       style={{
         position: "relative",
         zIndex: 1,
@@ -33,8 +49,12 @@ export function SpacesRail() {
         alignItems: "center",
         gap: 14,
         // The window has no title bar, so the top of this rail sits under the
-        // macOS traffic lights; leave them room.
-        padding: "44px 0 16px",
+        // macOS traffic lights; leave them room. As a drawer there are no
+        // traffic lights, but there is a notch.
+        padding: asDrawer
+          ? "calc(var(--safe-top) + 16px) 0 calc(var(--safe-bottom) + 16px)"
+          : "44px 0 16px",
+        height: asDrawer ? "100%" : undefined,
         borderRight: "1px solid var(--border-subtle)",
         background: "var(--ink-900)",
       }}
@@ -70,7 +90,7 @@ export function SpacesRail() {
         name="everything"
         active={activeSpaceId === null}
         accent="var(--accent-primary)"
-        onClick={() => setActiveSpace(null)}
+        onClick={() => chooseSpace(null)}
       />
 
       <div
@@ -95,7 +115,7 @@ export function SpacesRail() {
             badge={space.notificationCount}
             active={activeSpaceId === space.id}
             accent={accentFor(space.id)}
-            onClick={() => setActiveSpace(space.id)}
+            onClick={() => chooseSpace(space.id)}
           />
         ))}
       </div>
@@ -128,6 +148,27 @@ export function SpacesRail() {
           <PresenceDot />
         </div>
       </div>
+    </div>
+  );
+
+  if (!asDrawer) return rail;
+
+  // Tapping anywhere off the rail dismisses it — the standard way out of a
+  // drawer, and the only one that doesn't need a visible close button eating
+  // space in a 76px column.
+  return (
+    <div
+      onClick={onClose}
+      role="presentation"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 120,
+        display: "flex",
+        background: "rgba(0,0,0,.5)",
+      }}
+    >
+      {rail}
     </div>
   );
 }

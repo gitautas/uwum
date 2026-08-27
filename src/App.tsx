@@ -1,10 +1,13 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import * as ipc from "./lib/ipc";
 import { startNotifications } from "./lib/notify";
 import { resetPresence } from "./lib/presence";
 import { applyAccent, load as loadSettings } from "./lib/settings";
+import type { RoomSummary } from "./lib/types";
+import { useEdgeSwipeBack, useIsMobile, useKeyboardSafeArea } from "./lib/viewport";
 import { selectActiveRoom, useStore } from "./store";
 import { ChatPane, EmptyPane } from "./components/ChatPane";
 import { CreateRoom } from "./components/CreateRoom";
@@ -111,7 +114,9 @@ function Shell() {
     })),
   );
   const activeRoom = useStore(selectActiveRoom);
+  const isMobile = useIsMobile();
 
+  useKeyboardSafeArea(isMobile);
   useBackendEvents();
   useAppShortcuts();
   useNotifications();
@@ -121,8 +126,12 @@ function Shell() {
     <div
       style={{
         display: "flex",
-        height: "100vh",
-        minHeight: 620,
+        // `dvh` rather than `vh`: on iOS the visual viewport shrinks when the
+        // keyboard comes up, and `vh` doesn't notice — the composer would sit
+        // underneath it. `minHeight` is a desktop window constraint and would
+        // force a scroll on a short phone, so it only applies there.
+        height: isMobile ? "100dvh" : "100vh",
+        minHeight: isMobile ? undefined : 620,
         background: "var(--surface-app)",
         color: "var(--text-primary)",
         fontFamily: "var(--font-body)",
@@ -132,12 +141,18 @@ function Shell() {
     >
       <BackdropPattern />
 
-      <SpacesRail />
-      <RoomList />
+      {isMobile ? (
+        <MobilePanes room={activeRoom} showInfo={showInfo} />
+      ) : (
+        <>
+          <SpacesRail />
+          <RoomList />
 
-      {activeRoom ? <ChatPane room={activeRoom} /> : <EmptyPane />}
+          {activeRoom ? <ChatPane room={activeRoom} /> : <EmptyPane />}
 
-      {showInfo && activeRoom && <RoomInfo room={activeRoom} />}
+          {showInfo && activeRoom && <RoomInfo room={activeRoom} />}
+        </>
+      )}
 
       <SettingsView />
       <ProfileCard />
@@ -182,13 +197,92 @@ function Shell() {
         </div>
       )}
 
-      {/* Fills the space left of the traffic lights so the window is draggable. */}
-      {activeRoomId === null && (
+      {/* Fills the space left of the traffic lights so the window is draggable.
+          There is no title bar to drag on a phone. */}
+      {activeRoomId === null && !isMobile && (
         <div
           className="uwu-drag"
           style={{ position: "absolute", top: 0, left: 76, right: 0, height: 28 }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The phone layout: one pane at a time.
+ *
+ * The stack falls out of state that already exists — no room is the root, a
+ * room is the chat, and a room plus `showInfo` is the details view — so
+ * navigation stays a single source of truth shared with the desktop shell
+ * rather than a parallel one that can drift out of step with it.
+ *
+ * The spaces rail is the exception. On desktop it is always visible, which on a
+ * 390pt screen would cost a fifth of the width to something touched once a
+ * session, so here it is a drawer over the list.
+ */
+function MobilePanes({ room, showInfo }: { room: RoomSummary | undefined; showInfo: boolean }) {
+  const { selectRoom, closeInfo } = useStore(
+    useShallow((s) => ({ selectRoom: s.selectRoom, closeInfo: s.closeInfo })),
+  );
+  const [spacesOpen, setSpacesOpen] = useState(false);
+  const roomId = room?.id;
+  const leaveRoom = useCallback(() => void selectRoom(null), [selectRoom]);
+
+  // `showInfo` is a saved *desktop* preference, so a phone can arrive with it
+  // already true and drop the user into the details view the instant they open
+  // a room. Entering a room always starts at the messages.
+  useEffect(() => {
+    closeInfo();
+  }, [roomId, closeInfo]);
+
+  if (room && showInfo) {
+    return (
+      <SwipeBack onBack={closeInfo}>
+        <RoomInfo room={room} onBack={closeInfo} />
+      </SwipeBack>
+    );
+  }
+  if (room) {
+    return (
+      <SwipeBack onBack={leaveRoom}>
+        <ChatPane room={room} onBack={leaveRoom} />
+      </SwipeBack>
+    );
+  }
+
+  return (
+    <>
+      <RoomList onOpenSpaces={() => setSpacesOpen(true)} />
+      {spacesOpen && <SpacesRail asDrawer onClose={() => setSpacesOpen(false)} />}
+    </>
+  );
+}
+
+/**
+ * Wraps a pushed view so it can be swiped away from the left edge.
+ *
+ * A plain element rather than something the panes handle themselves: the swipe
+ * belongs to the *stack*, not to a chat or a details view, and the two would
+ * otherwise each grow their own copy of it.
+ */
+function SwipeBack({ onBack, children }: { onBack: () => void; children: ReactNode }) {
+  const { ref, style } = useEdgeSwipeBack(onBack);
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: "flex",
+        // The pane's own background travels with it, so the shell's backdrop
+        // shows through the gap rather than a slice of white.
+        background: "var(--surface-app)",
+        ...style,
+      }}
+    >
+      {children}
     </div>
   );
 }

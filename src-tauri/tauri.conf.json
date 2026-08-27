@@ -33,7 +33,7 @@
     "targets": "all",
     "category": "SocialNetworking",
     "shortDescription": "a cute matrix client",
-    "longDescription": "uwum — a Matrix client with end-to-end encryption and LiveKit voice, in the UwU design system.",
+    "longDescription": "uwum \u2014 a Matrix client with end-to-end encryption and LiveKit voice, in the UwU design system.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -70,6 +70,9 @@
           "xdg-desktop-portal"
         ]
       }
+    },
+    "iOS": {
+      "developmentTeam": "Q54KD9V8NQ"
     }
   }
 }

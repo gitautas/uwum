@@ -151,6 +151,8 @@ interface Actions {
   setFilter(filter: RoomFilter): void;
   setSearch(search: string): void;
   toggleInfo(): void;
+  /** Close the info panel without touching the saved layout preference. */
+  closeInfo(): void;
   openSettings(): void;
   closeSettings(): void;
   /** Clicking the same avatar again closes the card, like every other popover. */
@@ -338,6 +340,11 @@ export const useStore = create<State & Actions>((set, get) => ({
       prefs.save(settings);
       return { showInfo, settings };
     }),
+
+  // Deliberately not persisted. On mobile the info panel is a *view* rather
+  // than a panel, so leaving a room closes it — and that navigation should not
+  // rewrite what the user chose for the desktop layout.
+  closeInfo: () => set({ showInfo: false }),
 
   openSettings: () => set({ showSettings: true }),
   closeSettings: () => set({ showSettings: false }),

@@ -22,7 +22,18 @@ export function Icon({
     <i
       className={`ph-fill ph-${name}`}
       aria-hidden
-      style={{ fontSize: size, color, lineHeight: 1, ...style }}
+      style={{
+        fontSize: size,
+        color,
+        lineHeight: 1,
+        // An icon is a fixed-size glyph, never a thing to squeeze. As a flex
+        // item it would otherwise shrink like any other inline content — so an
+        // icon sitting beside a long label (a reply quote, the encryption
+        // notice, a system event) would quietly compress to nothing while the
+        // text beside it stayed. Callers can still override via `style`.
+        flex: "none",
+        ...style,
+      }}
     />
   );
 }

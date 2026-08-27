@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { formatDayDivider, joinNames, localpart } from "../lib/display";
 import { cachedProfile, loadProfile } from "../lib/profiles";
+import { dismissKeyboard, useIsMobile } from "../lib/viewport";
 import type { TimelineItem, TypingUser } from "../lib/types";
 import { useStore } from "../store";
 import { MessageRow } from "./MessageRow";
@@ -34,6 +35,7 @@ export function TimelineView({
   roomId: string;
   threadRoot?: string;
 }) {
+  const isMobile = useIsMobile();
   const key = threadRoot ? `${roomId}|${threadRoot}` : roomId;
 
   const {
@@ -63,36 +65,103 @@ export function TimelineView({
   const scroller = useRef<HTMLDivElement>(null);
   /** True while the user is parked at the bottom, so new messages should follow. */
   const stuckToBottom = useRef(true);
-  /** Scroll height before a pagination, so we can restore the reading position. */
-  const heightBeforePagination = useRef<number | null>(null);
+  /**
+   * The row we hold still, and where it sat at the previous commit.
+   *
+   * This is scroll anchoring, done by hand because WebKit has none. Two earlier
+   * attempts failed for the same reason: they tried to identify *which* change
+   * should move the viewport — a pagination, and only a pagination. But the
+   * spinner that appears above the list while loading shifts every row down as
+   * surely as a prepend does, and so does an image finishing, and a name
+   * resolving. Deciding which shifts to correct is guesswork.
+   *
+   * So this corrects all of them. The rule is simply: the row the reader is
+   * looking at does not move. Whatever happened above it — content, spinner,
+   * a picture growing — is cancelled out.
+   */
+  const anchorId = useRef<string | null>(null);
+  /** Where that row was *before* the commit now being applied. See below. */
+  const anchorWas = useRef<number | null>(null);
   const lastKey = useRef(key);
+
+  /** A row's top edge, relative to the top of the scrolling viewport. */
+  function offsetOf(el: HTMLElement, row: HTMLElement): number {
+    return row.getBoundingClientRect().top - el.getBoundingClientRect().top;
+  }
+
+  function rowById(el: HTMLElement, id: string): HTMLElement | null {
+    return el.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+  }
+
+  /**
+   * The topmost row still on screen.
+   *
+   * Partially visible counts — that row is what the eye is on, and taking the
+   * first *fully* visible one lets the anchor drift by up to a row.
+   */
+  function topmostRow(el: HTMLElement): HTMLElement | null {
+    for (const row of el.querySelectorAll<HTMLElement>("[data-row-id]")) {
+      if (offsetOf(el, row) + row.offsetHeight > 0) return row;
+    }
+    return null;
+  }
+
+  // Read, during render, where the anchor sits *before* React commits.
+  //
+  // This is the one measurement a `useLayoutEffect` cannot take: by the time it
+  // runs the DOM has already changed, and the old position is gone. Class
+  // components have `getSnapshotBeforeUpdate` for exactly this; with hooks the
+  // render pass is the only moment left. Reading layout here is safe — it is a
+  // read, it writes nothing, and it happens before any mutation.
+  if (!stuckToBottom.current && scroller.current && anchorId.current) {
+    const row = rowById(scroller.current, anchorId.current);
+    anchorWas.current = row ? offsetOf(scroller.current, row) : null;
+  } else {
+    anchorWas.current = null;
+  }
 
   // Jump to the newest message when switching rooms.
   useEffect(() => {
     if (lastKey.current !== key) {
       lastKey.current = key;
       stuckToBottom.current = true;
+      anchorId.current = null;
+      anchorWas.current = null;
     }
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [key]);
 
+  // Applied after every commit, not just the ones we think matter.
+  //
+  // No dependency array on purpose: any render can move things above the
+  // reader, and the pre-commit snapshot above is only valid for the commit that
+  // immediately follows it. When nothing moved the delta is zero and this
+  // writes nothing, so the cost of running always is a single measurement.
   useLayoutEffect(() => {
     const el = scroller.current;
     if (!el) return;
 
-    // After loading older messages the content grows upward; keep the message
-    // the user was reading exactly where it was.
-    if (heightBeforePagination.current !== null) {
-      el.scrollTop = el.scrollHeight - heightBeforePagination.current;
-      heightBeforePagination.current = null;
+    // Parked at the bottom wins: at room open the filling pass prepends while
+    // we are pinned there, and following the newest message is what the reader
+    // asked for by staying put.
+    if (stuckToBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      anchorId.current = null;
       return;
     }
 
-    if (stuckToBottom.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [items]);
+    const before = anchorWas.current;
+    const id = anchorId.current;
+    anchorWas.current = null;
+    if (before === null || id === null) return;
+
+    const row = rowById(el, id);
+    if (!row) return;
+
+    const drift = offsetOf(el, row) - before;
+    if (drift !== 0) el.scrollTop += drift;
+  });
 
   // Keep loading until the timeline actually overflows.
   //
@@ -101,6 +170,24 @@ export function TimelineView({
   // fills the viewport first, after which scrolling takes over. `exhausted`
   // ends it at the start of the room, and the attempt cap stops a room whose
   // history is all filtered-out events from looping forever.
+  /**
+   * Ask for older messages, at most one request at a time.
+   *
+   * The store's `paginating` flag only reaches this component on the *next*
+   * render, so every scroll event fired in between still sees `false` and asks
+   * again. The store dedupes, so the extra calls were harmless — but they are
+   * noise on every scroll to the top, and a local ref is the honest guard.
+   */
+  const fetching = useRef(false);
+
+  const paginate = useCallback(() => {
+    if (fetching.current) return;
+    fetching.current = true;
+    void loadOlder().finally(() => {
+      fetching.current = false;
+    });
+  }, [loadOlder]);
+
   const fillAttempts = useRef(0);
 
   useEffect(() => {
@@ -116,8 +203,8 @@ export function TimelineView({
     if (overflows) return;
 
     fillAttempts.current += 1;
-    void loadOlder();
-  }, [items, ready, paginating, exhausted, loadOlder, key]);
+    paginate();
+  }, [items, ready, paginating, exhausted, paginate, key]);
 
   function onScroll() {
     const el = scroller.current;
@@ -126,14 +213,20 @@ export function TimelineView({
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
     stuckToBottom.current = distanceFromBottom < 80;
 
+    // Whatever is at the top of the viewport now is what must stay there
+    // through the next commit. Re-picking on every scroll is what keeps the
+    // correction from ever fighting the reader: if they moved, the anchor moved
+    // with them, and the next delta is zero.
+    const top = topmostRow(el);
+    anchorId.current = top?.dataset.rowId ?? null;
+
     if (
       el.scrollTop < PAGINATE_THRESHOLD_PX &&
       ready &&
       !paginating &&
       !exhausted
     ) {
-      heightBeforePagination.current = el.scrollHeight;
-      void loadOlder();
+      paginate();
     }
   }
 
@@ -144,9 +237,14 @@ export function TimelineView({
       ref={scroller}
       onScroll={onScroll}
       className="uwu-scroll"
+      // Scrolling back through the conversation dismisses the keyboard, the way
+      // a native list does. Harmless on desktop, where nothing is focused by
+      // touch and there is no keyboard to drop.
+      onTouchMove={dismissKeyboard}
       style={{
         flex: 1,
-        padding: "18px 22px 8px",
+        // 22px each side is a fifth of a phone's width spent on margin.
+        padding: isMobile ? "12px 12px 8px" : "18px 22px 8px",
         display: "flex",
         flexDirection: "column",
         gap: 3,
@@ -182,6 +280,7 @@ export function TimelineView({
           return (
             <div
               key={item.id}
+              data-row-id={item.id}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -248,6 +347,7 @@ export function TimelineView({
         return (
           <MessageRow
             key={item.id}
+            rowId={item.id}
             item={item.event}
             roomId={roomId}
             threadRoot={threadRoot}

@@ -532,3 +532,22 @@ export interface StickerOptions {
   size?: number | null;
   mimetype?: string | null;
 }
+
+/** One item from the device's photo library, with an inline thumbnail. */
+export interface Photo {
+  id: string;
+  video: boolean;
+  seconds: number;
+  /** A `data:` URI, so a tile needs no second round trip to draw. */
+  thumb: string;
+}
+
+export interface RecentPhotos {
+  /** False everywhere there is no photo library — every desktop platform. */
+  supported: boolean;
+  /** The user shared only some photos. Those are the ones we can see. */
+  limited: boolean;
+  /** Access refused, so the grid shows why rather than looking empty. */
+  denied: boolean;
+  photos: Photo[];
+}

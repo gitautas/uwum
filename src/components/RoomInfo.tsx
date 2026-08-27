@@ -14,7 +14,10 @@ import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
 /** Matches the panel below, so a full-bleed cover is asked for at its width. */
 const PANEL_WIDTH = 296;
 
-export function RoomInfo({ room }: { room: RoomSummary }) {
+/** `onBack` is passed only by the mobile shell, where this is a pushed view
+    rather than a side panel. See `ChatPane` for why the prop doubles as the
+    layout switch. */
+export function RoomInfo({ room, onBack }: { room: RoomSummary; onBack?: () => void }) {
   const [members, setMembers] = useState<RoomMember[] | null>(null);
   const showBanner = useStore((s) => s.showBanner);
   const openLightbox = useStore((s) => s.openLightbox);
@@ -68,20 +71,45 @@ export function RoomInfo({ room }: { room: RoomSummary }) {
       style={{
         position: "relative",
         zIndex: 1,
-        width: PANEL_WIDTH,
-        flex: "none",
-        borderLeft: "1px solid var(--border-subtle)",
+        width: onBack ? "100%" : PANEL_WIDTH,
+        flex: onBack ? 1 : "none",
+        // The border separates this from the timeline beside it. As a pushed
+        // view there is nothing to its left to separate it from.
+        borderLeft: onBack ? undefined : "1px solid var(--border-subtle)",
         background: "rgba(17,17,23,.72)",
-        padding: "18px 16px 24px",
+        padding: onBack
+          ? "calc(var(--safe-top) + 56px) 16px calc(var(--safe-bottom) + 24px)"
+          : "18px 16px 24px",
       }}
     >
+      {onBack && (
+        <button
+          onClick={onBack}
+          aria-label="back to messages"
+          style={{
+            position: "absolute",
+            top: "calc(var(--safe-top) + 6px)",
+            left: 4,
+            width: 44,
+            height: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            zIndex: 2,
+          }}
+        >
+          <Icon name="caret-left" size={18} color="var(--text-secondary)" />
+        </button>
+      )}
+
       <button
         onClick={() => setSettingsOpen(true)}
         title="room settings"
         aria-label="room settings"
         style={{
           position: "absolute",
-          top: 14,
+          top: onBack ? "calc(var(--safe-top) + 14px)" : 14,
           right: 14,
           width: 28,
           height: 28,
