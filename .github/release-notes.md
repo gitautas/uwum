@@ -1,10 +1,44 @@
+## What's new
+
+### uwum updates itself
+
+The desktop builds now check for a new version on launch and offer to install
+it. Accept, and it downloads, verifies the signature and restarts into the new
+version — no visit to this page required, ever again. There is also a
+**check now** button under *settings → about* if you would rather ask than be
+told.
+
+Every update is cryptographically signed, and the app installs nothing that
+does not carry that signature.
+
+### Runs on Android
+
+uwum now builds and runs on Android, microphone permission included, so voice
+calls work on a phone.
+
+### Calls ring
+
+An incoming call in a DM now rings, instead of appearing silently and hoping
+you were looking.
+
+### Fixes
+
+- Device verification could get stuck when the state did not match the flow it
+  belonged to.
+- Two stream tasks could end up watching the same timeline, doubling events.
+- The window can be dragged by its title bar again.
+
 <!-- Prepend the changelog for this release above this line before publishing. -->
 
 ## Updating
 
 The macOS, Windows and AppImage builds update themselves: they check on launch
-and offer the new version in-app. The `.deb`, `.apk` and `.ipa` are installed by
-something else, so those tell you a release is out and send you back here.
+and offer the new version in-app. A `.deb` is owned by your package manager
+rather than by uwum, so those builds tell you a release is out and send you back
+here instead.
+
+This release is **desktop only** — the Android and iOS builds are not signed
+yet, so no `.apk` or `.ipa` is attached.
 
 ## Installing
 
