@@ -528,10 +528,21 @@ jobs:
       # Uploaded before the release leaves draft, so `/releases/latest/download/
       # latest.json` — the endpoint every installed app polls — never resolves to
       # a release whose manifest hasn't landed yet.
+      # `--repo` is not optional here. This job never checks the repository out —
+      # it has no need of the source — and `gh release upload` infers its target
+      # from the git remote rather than from $GITHUB_REPOSITORY, so without it
+      # the command dies on "not a git repository". Every other call in this job
+      # already names the repo because it goes through `gh api repos/...`; this
+      # was the one that did not, and it is why the manifest generated correctly
+      # and then failed to attach.
+      #
+      # The mobile jobs get away with the bare form only because they check out.
       - name: Attach the manifest to the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" latest.json --clobber
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" latest.json \
+            --repo "${GITHUB_REPOSITORY}" --clobber
 
       - name: Publish release
         env:
