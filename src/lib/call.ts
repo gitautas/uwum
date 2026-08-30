@@ -22,6 +22,8 @@ import {
   type TrackPublication,
 } from "livekit-client";
 
+import type { UwuError } from "./types";
+
 import * as ipc from "./ipc";
 import { load as loadSettings } from "./settings";
 
@@ -78,6 +80,38 @@ export function screenShareSupported(): boolean {
   return typeof navigator?.mediaDevices?.getDisplayMedia === "function";
 }
 
+/**
+ * Why this WebView has no WebRTC, in a sentence that names something real.
+ *
+ * The causes are indistinguishable from JavaScript — the constructor is simply
+ * absent — and one of them is indistinguishable from the native side too:
+ * WebKitGTK stores `enable-webrtc` whether or not there is any WebRTC behind
+ * it, so a build with WebRTC compiled out looks, from every API we can reach,
+ * exactly like one that has it. That is also the usual case, so it is what we
+ * say when nothing else explains it.
+ */
+async function describeMissingWebrtc(): Promise<string> {
+  const info = await ipc.webrtcDiagnosis().catch(() => null);
+  if (!info) {
+    return "this webview has no webrtc stack, so calls can't work here.";
+  }
+  const missing = [
+    info.gstWebrtc ? null : "gst-plugins-bad",
+    info.gstNice ? null : "gstreamer's libnice",
+  ].filter(Boolean);
+  const webkit = info.appimage
+    ? `the appimage's webkitgtk ${info.webkitVersion}`
+    : `webkitgtk ${info.webkitVersion}`;
+
+  return (
+    `voice can't work in this webview: ${webkit} was built without webrtc. ` +
+    "webkit leaves it off unless it is built with -DENABLE_WEB_RTC=ON, and no " +
+    "distribution turns it on" +
+    (missing.length ? `, and ${missing.join(" and ")} would be missing too` : "") +
+    "."
+  );
+}
+
 type Listener = (state: CallState) => void;
 
 /**
@@ -117,6 +151,14 @@ class CallController {
     this.update({ roomId, status: "connecting", error: null, participants: [] });
 
     try {
+      // Before advertising membership: a WebView with no `RTCPeerConnection`
+      // can't hold up its end of the call, and livekit's own message for it
+      // ("update your browser", "disable your extensions") describes a browser
+      // nobody here is running. Say what's actually wrong instead.
+      if (typeof RTCPeerConnection === "undefined") {
+        throw { kind: "other", message: await describeMissingWebrtc() } satisfies UwuError;
+      }
+
       const settings = loadSettings();
       const credentials = await ipc.joinCall(roomId, settings.livekitUrl || undefined);
 
