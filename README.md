@@ -34,8 +34,12 @@ rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-andro
 The release workflow builds a signed `.apk` and `.ipa` on every `v*` tag, and on
 demand via *Run workflow* (which attaches them as run artifacts instead of
 touching a release). Both jobs **fail without their signing secrets** rather
-than attaching something nobody can install, so a tag will not publish until
-these exist in the repository's Actions secrets:
+than attaching something nobody can install.
+
+Their failure no longer holds up the release: the desktop bundles and the
+updater manifest publish on their own, and the run carries a warning saying the
+phone builds are absent (see *Updates* below). To get them attached, these have
+to exist in the repository's Actions secrets:
 
 | Secret | What it is |
 | --- | --- |

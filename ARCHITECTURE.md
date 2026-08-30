@@ -155,10 +155,16 @@ result — which across parallel rows is five read-modify-writes of one file,
 where the last writer wins and the losers' platforms disappear silently. A
 release that looks complete then offers nothing to half its users.
 
-So `includeUpdaterJson` is off, and `publish` builds the manifest once, after
+So the upload is off, and `publish` builds the manifest once, after
 every row has landed, from the assets that are *actually attached* — not from
 what the matrix was supposed to produce. A platform whose build flaked cannot
 reach the manifest, and a manifest entry cannot point at a missing asset.
+
+The input that switches it off is `uploadUpdaterJson`, and the name has to be
+exact. It defaults to **true**, and an unrecognised input is a warning rather
+than an error, so a plausible near-miss — `includeUpdaterJson`, say — leaves the
+racing default switched on while the run still goes green. If you touch this,
+read the run log for `Unexpected input(s)` rather than trusting the tick.
 
 ### The verification modal has to outrank every other overlay
 
