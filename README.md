@@ -24,9 +24,30 @@ WebView there is WebKitGTK, whose `ENABLE_WEB_RTC` follows
 `ENABLE_EXPERIMENTAL_FEATURES` — off — and no distribution overrides it, so
 `RTCPeerConnection` does not exist however the `enable-webrtc` setting reads
 back. Everything else works; joining a call says so rather than failing
-obscurely. A WebKitGTK built with `-DENABLE_WEB_RTC=ON` (plus gst-plugins-bad
-and libnice, which the packages already depend on) is the only thing that
-changes it.
+obscurely.
+
+A WebKitGTK built with WebRTC in it is the only thing that changes that, and
+building one is the whole of the workaround. On Arch, rebuild the distribution
+package with two flags added to `cmake_options`:
+
+```bash
+git clone https://gitlab.archlinux.org/archlinux/packaging/packages/webkit2gtk-4.1
+cd webkit2gtk-4.1
+# in cmake_options: -D ENABLE_WEB_RTC=ON  -D USE_LIBRICE=OFF
+makepkg -si
+```
+
+`USE_LIBRICE` defaults to `ON` in 2.52 and no distribution packages librice yet,
+so cmake stops on it; `OFF` puts ICE back on libnice. `USE_GSTREAMER_WEBRTC` is
+already `ON` by default, and OpenSSL 3 and `gstreamer-webrtc-1.0` (from
+gst-plugins-bad) are the only other build-time requirements. Expect hours and
+tens of gigabytes, and an `IgnorePkg` entry so the next `-Syu` doesn't undo it.
+
+That build has to be the one the app actually loads, which the **AppImage is
+not** — linuxdeploy bundles a WebKitGTK and its `WebKitWebProcess` inside, so
+the AppImage ignores whatever is installed on the system. Run a locally built
+uwum (`npm run app`, or `npm run app:build` on the patched machine) to get the
+system WebKitGTK.
 
 Android needs an SDK, an NDK and a JDK. `npm run android` finds all three
 itself if they are installed; from nothing, that is:
