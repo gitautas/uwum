@@ -43,13 +43,24 @@ to exist in the repository's Actions secrets:
 
 | Secret | What it is |
 | --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.jks` — the keystore itself |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -i release.jks \| tr -d '\n'` — the keystore itself |
 | `ANDROID_KEYSTORE_PASSWORD` | its store password |
 | `ANDROID_KEY_ALIAS` | the alias inside it |
 | `ANDROID_KEY_PASSWORD` | that key's password |
-| `IOS_CERTIFICATE_BASE64` | `base64 -w0 cert.p12` — an Apple distribution certificate |
+| `IOS_CERTIFICATE_BASE64` | `base64 -i cert.p12 \| tr -d '\n'` — an Apple distribution certificate |
 | `IOS_CERTIFICATE_PASSWORD` | the password set when exporting the `.p12` |
-| `IOS_PROVISIONING_PROFILE_BASE64` | `base64 -w0 profile.mobileprovision` |
+| `IOS_PROVISIONING_PROFILE_BASE64` | `base64 -i profile.mobileprovision \| tr -d '\n'` |
+
+`-i` and the `tr`, rather than GNU's `-w0`: macOS ships BSD `base64`, which
+rejects a bare filename and has no `-w`. It fails *quietly* in a pipeline — the
+pipe delivers nothing and `gh secret set` stores an empty secret without
+complaint, which surfaces an hour later as an unreadable keystore in CI. Check a
+secret round-trips before trusting it:
+
+```bash
+base64 -i release.jks | tr -d '\n' | base64 -d | shasum -a256   # must match
+shasum -a256 release.jks
+```
 
 A keystore, once made, cannot be replaced: Android identifies an app by its
 signing key, so a new one is a new app that cannot update the old.
