@@ -156,7 +156,11 @@ jobs:
           # latest.json, add its platform and write it back — five racing
           # read-modify-writes against one asset, where the loser's platform
           # silently vanishes from the manifest.
-          includeUpdaterJson: false
+          #
+          # The name matters: this defaults to true, and an unrecognised input is
+          # a *warning*, not an error, so a near-miss like `includeUpdaterJson`
+          # leaves the racing default switched on and the run still goes green.
+          uploadUpdaterJson: false
           # Empty on workflow_dispatch (create-release skipped) -> build-only mode,
           # nothing is uploaded anywhere. Populated on tag pushes -> assets upload
           # into the one pre-created draft (no per-job get-or-create race).
@@ -176,6 +180,8 @@ jobs:
             src-tauri/target/**/release/bundle/appimage/*.AppImage
             src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/nsis/*-setup.exe
+            src-tauri/target/**/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/**/release/bundle/**/*.sig
 
   # ---------------------------------------------------------------------------
   # Mobile
@@ -390,11 +396,20 @@ jobs:
           path: ${{ steps.ipa.outputs.path }}
 
   publish:
-    # Only after every matrix row uploaded its bundles. If any platform failed,
-    # this is skipped and the draft stays private with whatever did build, so the
-    # run can be re-run without ever showing users a half-populated release.
+    # Waits on mobile so the APK and IPA get their chance to attach before the
+    # release goes public, but does not *depend* on them: the desktop bundles and
+    # the updater manifest are a complete, coherent release on their own, and a
+    # missing Android keystore has no business stranding the update chain for
+    # every Mac, Windows and AppImage user. Mobile still fails loudly in its own
+    # job — this only stops that failure from taking the desktop release with it.
+    #
+    # `!cancelled()` rather than `success()`, because a `needs` job that failed
+    # would otherwise skip this one; the guard below re-imposes the parts that
+    # genuinely are prerequisites.
     needs: [create-release, build, android, ios]
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && github.event_name == 'push'
+            && needs.create-release.result == 'success'
+            && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -416,14 +431,21 @@ jobs:
           for want in 'aarch64\.dmg$' '(x64|x86_64)\.dmg$' \
                       '(amd64|x86_64)\.deb$' '(arm64|aarch64)\.deb$' \
                       '(amd64|x86_64)\.AppImage$' '(arm64|aarch64)\.AppImage$' \
-                      '\.msi$' '\-setup\.exe$' \
-                      '\.apk$' '\.ipa$'; do
+                      '\.msi$' '\-setup\.exe$'; do
             if ! grep -qiE -- "${want}" assets.txt; then
               echo "::error::No release asset matched /${want}/"
               missing=1
             fi
           done
           [ "${missing}" -eq 0 ]
+
+          # Mobile is reported, not enforced — see this job's `if`. A notice
+          # rather than silence, so a release that shipped without a phone build
+          # says so on the run instead of being noticed weeks later.
+          for want in '\.apk$' '\.ipa$'; do
+            grep -qiE -- "${want}" assets.txt \
+              || echo "::warning::No release asset matched /${want}/ — publishing desktop only."
+          done
 
       # ----------------------------------------------------------------------
       # The updater manifest.
