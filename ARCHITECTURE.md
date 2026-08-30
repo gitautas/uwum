@@ -19,6 +19,7 @@ src-tauri/src/
     presence.rs   who's online, polled for whoever is on screen
   verification.rs emoji SAS + key recovery
   rtc.rs          MatrixRTC membership + LiveKit token exchange
+  update.rs       which update path this build can take, and what's newest
 
 src/
   lib/ipc.ts      typed wrappers over every command and event
@@ -28,6 +29,7 @@ src/
   lib/blobMedia.ts video/audio over IPC, because a custom scheme can't serve it
   lib/call.ts     LiveKit room, mic, participant state
   lib/presence.ts refcounts who the UI is drawing, so Rust polls no one else
+  lib/update.ts   the update state machine, both the in-app and manual paths
   store/          zustand store: a projection of Rust's truth + UI state
   components/     the design, implemented
 ```
@@ -126,6 +128,37 @@ spellings in the wild (`m.video_room`, `io.element.video`,
 room the user joined and can see in every other client vanishing from the sidebar
 is far worse than an unfamiliar room appearing in it, so `is_utility_room_type`
 names the types we hide — ours, and only ours — rather than the ones we keep.
+
+### An update is only ours to install where we own the install
+
+Tauri's updater replaces a bundle in place, so it works exactly where there is a
+bundle we put there: a `.app`, an AppImage, an NSIS install root. The release
+workflow also ships a `.deb`, an `.apk` and an `.ipa`, and those belong to apt
+or to the phone — writing over them from inside the app would fail at best.
+
+The trap is Linux, where **the same binary ships both ways**. Nothing at compile
+time distinguishes the copy inside the AppImage from the one `dpkg` unpacked, so
+the decision has to be made at runtime, and the test is not a guess: the AppImage
+runtime exports `APPIMAGE` pointing at the image it launched from, and that is
+the exact variable the updater needs in order to know what to overwrite. Its
+presence is therefore the precise condition under which the update would work,
+which is why `update_mode` reads it rather than sniffing a path.
+
+The frontend never makes this call — it asks Rust and renders the answer.
+
+### The updater manifest cannot be written by the build matrix
+
+`latest.json` maps every platform to a signed bundle, and five matrix rows
+finish at five different times. `tauri-action` will maintain it for you by
+downloading the current manifest, adding its own platform and uploading the
+result — which across parallel rows is five read-modify-writes of one file,
+where the last writer wins and the losers' platforms disappear silently. A
+release that looks complete then offers nothing to half its users.
+
+So `includeUpdaterJson` is off, and `publish` builds the manifest once, after
+every row has landed, from the assets that are *actually attached* — not from
+what the matrix was supposed to produce. A platform whose build flaked cannot
+reach the manifest, and a manifest entry cannot point at a missing asset.
 
 ### The verification modal has to outrank every other overlay
 

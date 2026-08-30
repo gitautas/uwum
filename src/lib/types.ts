@@ -570,3 +570,20 @@ export interface RecentPhotos {
   denied: boolean;
   photos: Photo[];
 }
+
+/**
+ * Which update path this build can take.
+ *
+ * `in-app` means Tauri's updater can replace this install in place; `manual`
+ * means something else owns it (apt, the phone) and all we can do is point at
+ * the release page. Decided in Rust — see `update.rs` for why.
+ */
+export type UpdateMode = "in-app" | "manual";
+
+/** The newest published release, as read from the release manifest. */
+export interface LatestRelease {
+  version: string;
+  notes: string;
+  /** The release page, where every platform's asset is listed. */
+  url: string;
+}

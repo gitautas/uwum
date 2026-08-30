@@ -5,6 +5,7 @@ mod events;
 mod matrix;
 mod photos;
 mod rtc;
+mod update;
 mod verification;
 
 use matrix::core::AppState;
@@ -24,10 +25,20 @@ pub fn run() {
         )
         .init();
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+
+    // Not compiled on mobile at all (see Cargo.toml), so the registration has
+    // to be gated too — `update_mode` reports `manual` there and the frontend
+    // never reaches for these commands.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init());
+
+    builder
         .manage(AppState::default())
         .register_asynchronous_uri_scheme_protocol("uwum", handle_media_request)
         .invoke_handler(tauri::generate_handler![
@@ -107,6 +118,10 @@ pub fn run() {
             // photos
             photos::photos_recent,
             photos::photos_export,
+            // updates
+            update::update_mode,
+            update::update_available,
+            update::latest_release,
         ])
         .setup(|app| {
             // Read only by the platform-gated calls below; on iOS/Android

@@ -35,6 +35,18 @@ jobs:
             exit 1
           fi
 
+      # Without these the desktop bundlers silently skip the updater artifacts,
+      # and the manifest step at the end would fail after an hour and a half of
+      # building. Same principle as the mobile jobs: refuse early and loudly.
+      - name: Check the updater signing secrets exist
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "${SIGNING_KEY}" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not set — see 'Updates' in README.md. Without it the release cannot feed the in-app updater."
+            exit 1
+          fi
+
       # Idempotent: re-running a failed release run reuses the draft it already made
       # instead of failing on the duplicate tag. Draft releases are invisible to
       # /releases/tags/{tag}, so the lookup has to scan the release list.
@@ -132,7 +144,19 @@ jobs:
           # which the runner image lacks. Use AWS's prebuilt CI-verified NASM
           # objects instead of installing NASM. Read only by aws-lc-sys on Windows.
           AWS_LC_SYS_PREBUILT_NASM: '1'
+          # Turns `createUpdaterArtifacts` on in practice: with a key present the
+          # bundlers also emit the archive the updater downloads and a detached
+          # `.sig` beside it. The app only installs a bundle this key signed, so
+          # the pair below IS the trust root for every update anyone ever gets.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
+          # The manifest is written once, in `publish`, from the finished release.
+          # tauri-action's own version would have each of the five rows read
+          # latest.json, add its platform and write it back — five racing
+          # read-modify-writes against one asset, where the loser's platform
+          # silently vanishes from the manifest.
+          includeUpdaterJson: false
           # Empty on workflow_dispatch (create-release skipped) -> build-only mode,
           # nothing is uploaded anywhere. Populated on tag pushes -> assets upload
           # into the one pre-created draft (no per-job get-or-create race).
@@ -400,6 +424,92 @@ jobs:
             fi
           done
           [ "${missing}" -eq 0 ]
+
+      # ----------------------------------------------------------------------
+      # The updater manifest.
+      #
+      # This is the join between the two halves of distribution: the same
+      # release that carries the installers also carries the file the running
+      # app polls, built from the assets that are actually attached rather than
+      # from what the matrix was supposed to produce. A platform whose build
+      # flaked cannot end up in the manifest, and a manifest entry can never
+      # point at an asset that isn't there.
+      #
+      # Written here rather than by each build row because five parallel
+      # read-modify-writes of one JSON asset lose entries (see the `build` job).
+      #
+      # Only these three bundle kinds can update in place. The .deb, .apk and
+      # .ipa are installed by something that isn't us, and the app knows to ask
+      # those users to update by hand — see `update.rs`.
+      # ----------------------------------------------------------------------
+      - name: Build the updater manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+
+          # id and name together: a .sig has to be fetched through the API by id,
+          # because a draft release's assets are not publicly downloadable yet.
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" --paginate \
+            --jq '.[] | [.id, .name] | @tsv' > assets.tsv
+
+          # Release notes travel with the manifest so the app can show what
+          # changed without a second request to the GitHub API.
+          gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" --jq '.body' > notes.txt
+
+          platforms='{}'
+
+          # Tauri's platform keys, and the asset each one is served by. Windows
+          # is the NSIS installer rather than the MSI: it installs per-user, so
+          # an update needs no elevation prompt the app cannot answer.
+          while IFS='	' read -r key pattern; do
+            name="$(grep -iE -- "${pattern}" <(cut -f2 assets.tsv) | head -n1 || true)"
+            if [ -z "${name}" ]; then
+              echo "::error::No updater bundle for ${key} matched /${pattern}/"
+              exit 1
+            fi
+
+            sig_id="$(awk -F'\t' -v n="${name}.sig" '$2 == n { print $1 }' assets.tsv | head -n1)"
+            if [ -z "${sig_id}" ]; then
+              echo "::error::${name} was uploaded without its ${name}.sig — the build ran without TAURI_SIGNING_PRIVATE_KEY."
+              exit 1
+            fi
+
+            signature="$(gh api "repos/${GITHUB_REPOSITORY}/releases/assets/${sig_id}" \
+              -H 'Accept: application/octet-stream')"
+
+            platforms="$(jq -n --argjson p "${platforms}" --arg k "${key}" \
+              --arg url "${base}/${name}" --arg sig "${signature}" \
+              '$p + { ($k): { signature: $sig, url: $url } }')"
+
+            echo "${key} -> ${name}"
+          done <<'TARGETS'
+          darwin-aarch64	_aarch64\.app\.tar\.gz$
+          darwin-x86_64	_(x86_64|x64)\.app\.tar\.gz$
+          linux-x86_64	_(amd64|x86_64|x64)\.AppImage$
+          linux-aarch64	_(aarch64|arm64)\.AppImage$
+          windows-x86_64	_(x64|x86_64)-setup\.exe$
+          TARGETS
+
+          jq -n --arg version "${version}" --rawfile notes notes.txt \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson platforms "${platforms}" \
+            '{ version: $version, notes: $notes, pub_date: $pub_date, platforms: $platforms }' \
+            > latest.json
+
+          cat latest.json
+
+      # Uploaded before the release leaves draft, so `/releases/latest/download/
+      # latest.json` — the endpoint every installed app polls — never resolves to
+      # a release whose manifest hasn't landed yet.
+      - name: Attach the manifest to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" latest.json --clobber
 
       - name: Publish release
         env:
