@@ -13,6 +13,21 @@ val tauriProperties = Properties().apply {
     }
 }
 
+// Release signing, when a keystore has been provided.
+//
+// `keystore.properties` is gitignored and never in the repository: locally it
+// is written by hand, and in CI the release workflow writes it from secrets.
+// Its absence is the normal case — a debug build signs itself with the debug
+// key — so this stays optional rather than failing the build for everyone who
+// only wants to run the app on their own phone.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val hasReleaseKeystore = keystorePropertiesFile.exists()
+
 android {
     compileSdk = 36
     namespace = "lt.uwu.uwum"
@@ -23,6 +38,16 @@ android {
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
         versionName = tauriProperties.getProperty("tauri.android.versionName", "1.0")
+    }
+    signingConfigs {
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
     buildTypes {
         getByName("debug") {
@@ -37,6 +62,12 @@ android {
             }
         }
         getByName("release") {
+            // Without this the bundler still produces an APK, but an unsigned
+            // one, which no device will install — and it says so only in a line
+            // of Gradle output that is easy to miss.
+            if (hasReleaseKeystore) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             proguardFiles(
                 *fileTree(".") { include("**/*.pro") }

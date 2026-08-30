@@ -153,11 +153,223 @@ jobs:
             src-tauri/target/**/release/bundle/msi/*.msi
             src-tauri/target/**/release/bundle/nsis/*-setup.exe
 
+  # ---------------------------------------------------------------------------
+  # Mobile
+  #
+  # Separate jobs rather than matrix rows: tauri-action does not build mobile
+  # targets, both platforms need a toolchain nothing else does, and each signs
+  # with credentials the other has no use for.
+  #
+  # Both REQUIRE signing secrets and fail loudly without them, because an
+  # unsigned APK installs nowhere and an unsigned IPA is not an IPA anyone can
+  # use — a release that quietly attached either would be worse than one that
+  # did not build. See README for the secrets and how to make them.
+  # ---------------------------------------------------------------------------
+
+  android:
+    needs: create-release
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The NDK version is pinned rather than "latest": a compiler bump is a
+      # change to the shipped binary and should be a commit, not whatever the
+      # runner happened to have that morning.
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0 ndk;27.3.13750724'
+
+      # arm only. x86/x86_64 Android targets exist for emulators, and doubling
+      # the build time of a release to serve emulators is a poor trade — every
+      # phone this could be installed on is one of these two.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: android
+          save-if: ${{ github.ref_type == 'branch' }}
+
+      - run: npm ci
+
+      - name: Write the release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "${KEYSTORE_BASE64}" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — see 'Mobile releases' in README.md."
+            exit 1
+          fi
+
+          keystore="${RUNNER_TEMP}/uwum-release.jks"
+          printf '%s' "${KEYSTORE_BASE64}" | base64 -d > "${keystore}"
+
+          # A Java properties file, so a backslash in a value is an escape
+          # character and would silently corrupt the password. Double them.
+          escape() { printf '%s' "$1" | sed 's/\\/\\\\/g'; }
+
+          {
+            printf 'storeFile=%s\n' "$(escape "${keystore}")"
+            printf 'storePassword=%s\n' "$(escape "${KEYSTORE_PASSWORD}")"
+            printf 'keyAlias=%s\n' "$(escape "${KEY_ALIAS}")"
+            printf 'keyPassword=%s\n' "$(escape "${KEY_PASSWORD}")"
+          } > src-tauri/gen/android/keystore.properties
+
+      # `tauri android build` regenerates everything gen/android gitignores
+      # (tauri.build.gradle.kts, the generated Kotlin, the bundled config), so a
+      # clean checkout needs no `android init` step.
+      - name: Build a signed APK
+        run: npm run android:build -- --apk --target aarch64 armv7
+
+      - name: Name the APK after the version
+        id: apk
+        run: |
+          apk="$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -n1)"
+          if [ -z "${apk}" ]; then
+            echo "::error::the Android build produced no signed release APK"
+            exit 1
+          fi
+          name="uwum-${GITHUB_REF_NAME:-dev}-android.apk"
+          cp "${apk}" "${name}"
+          echo "path=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the APK to the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${{ steps.apk.outputs.path }}" --clobber
+
+      - name: Upload the APK as a run artifact (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: uwum-android
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ steps.apk.outputs.path }}
+
+  ios:
+    needs: create-release
+    if: ${{ !cancelled() && (needs.create-release.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    runs-on: macos-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: lts/*
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ios
+          save-if: ${{ github.ref_type == 'branch' }}
+
+      - run: npm ci
+
+      # Signing identities live in a keychain, and the runner's default one is
+      # not unlocked for non-interactive use. Build a throwaway keychain, put
+      # the certificate in it, and make it the one xcodebuild searches. The
+      # runner is destroyed afterwards, so nothing outlives the job.
+      - name: Import the signing certificate and provisioning profile
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -z "${CERTIFICATE_BASE64}" ] || [ -z "${PROVISIONING_PROFILE_BASE64}" ]; then
+            echo "::error::iOS signing secrets are not set — see 'Mobile releases' in README.md."
+            exit 1
+          fi
+
+          cert="${RUNNER_TEMP}/certificate.p12"
+          profile="${RUNNER_TEMP}/profile.mobileprovision"
+          keychain="${RUNNER_TEMP}/signing.keychain-db"
+          # Only ever unlocks this keychain, on a machine that is about to be
+          # thrown away, so it is generated rather than kept as a secret.
+          password="$(uuidgen)"
+
+          printf '%s' "${CERTIFICATE_BASE64}" | base64 -d > "${cert}"
+          printf '%s' "${PROVISIONING_PROFILE_BASE64}" | base64 -d > "${profile}"
+
+          security create-keychain -p "${password}" "${keychain}"
+          security set-keychain-settings -lut 21600 "${keychain}"
+          security unlock-keychain -p "${password}" "${keychain}"
+          security import "${cert}" -P "${CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain}"
+          # Without this, codesign prompts for permission to use the key — and a
+          # prompt on a runner is a job that hangs until it times out.
+          security set-key-partition-list -S apple-tool:,apple: -k "${password}" "${keychain}" >/dev/null
+          security list-keychain -d user -s "${keychain}"
+
+          profiles=~/Library/MobileDevice/Provisioning\ Profiles
+          mkdir -p "${profiles}"
+          cp "${profile}" "${profiles}/"
+
+      # `release-testing` is ad-hoc: it installs on the devices listed in the
+      # provisioning profile. Switch to app-store-connect for TestFlight, which
+      # needs a distribution profile rather than an ad-hoc one.
+      - name: Build a signed IPA
+        run: npm run ios:build -- --export-method release-testing --ci
+
+      - name: Name the IPA after the version
+        id: ipa
+        run: |
+          ipa="$(find src-tauri/gen/apple/build -name '*.ipa' | head -n1)"
+          if [ -z "${ipa}" ]; then
+            echo "::error::the iOS build produced no IPA"
+            exit 1
+          fi
+          name="uwum-${GITHUB_REF_NAME:-dev}-ios.ipa"
+          cp "${ipa}" "${name}"
+          echo "path=${name}" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the IPA to the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${{ steps.ipa.outputs.path }}" --clobber
+
+      - name: Upload the IPA as a run artifact (manual runs only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v6
+        with:
+          name: uwum-ios
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ steps.ipa.outputs.path }}
+
   publish:
     # Only after every matrix row uploaded its bundles. If any platform failed,
     # this is skipped and the draft stays private with whatever did build, so the
     # run can be re-run without ever showing users a half-populated release.
-    needs: [create-release, build]
+    needs: [create-release, build, android, ios]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -180,7 +392,8 @@ jobs:
           for want in 'aarch64\.dmg$' '(x64|x86_64)\.dmg$' \
                       '(amd64|x86_64)\.deb$' '(arm64|aarch64)\.deb$' \
                       '(amd64|x86_64)\.AppImage$' '(arm64|aarch64)\.AppImage$' \
-                      '\.msi$' '\-setup\.exe$'; do
+                      '\.msi$' '\-setup\.exe$' \
+                      '\.apk$' '\.ipa$'; do
             if ! grep -qiE -- "${want}" assets.txt; then
               echo "::error::No release asset matched /${want}/"
               missing=1
