@@ -6785,6 +6785,7 @@ dependencies = [
  "url",
  "uuid",
  "webkit2gtk",
+ "webkit2gtk-sys",
 ]
 
 [[package]]

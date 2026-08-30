@@ -587,3 +587,26 @@ export interface LatestRelease {
   /** The release page, where every platform's asset is listed. */
   url: string;
 }
+
+/**
+ * What the native side can see about this WebView's WebRTC support, asked for
+ * only once `RTCPeerConnection` has turned out to be missing. `null` off Linux,
+ * where the platform WebView has always had a WebRTC stack — see
+ * `src-tauri/src/webrtc.rs`.
+ */
+export interface WebrtcDiagnosis {
+  /** `enable-webrtc`, read back from WebKitGTK after we set it. */
+  settingEnabled: boolean;
+  /** `enable-media-stream`, likewise. */
+  mediaStreamEnabled: boolean;
+  /** WebKitGTK's runtime version, e.g. `2.44.3`. */
+  webkitVersion: string;
+  /** Is `libgstwebrtc.so` (gst-plugins-bad) installed? */
+  gstWebrtc: boolean;
+  /** Is `libgstnice.so` (gstreamer1.0-nice) installed? */
+  gstNice: boolean;
+  /** Running from an AppImage, which brings its own WebKitGTK. */
+  appimage: boolean;
+  /** Have we already spent our one recovery reload? */
+  reloaded: boolean;
+}

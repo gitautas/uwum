@@ -90,6 +90,8 @@ tauri-plugin-process = "2"
 # `set_enable_webrtc`.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"] }
+# Only for `webkit_get_*_version`, which the safe wrapper doesn't re-export.
+webkit2gtk-sys = "=2.0.2"
 
 
 # `keyring`'s `v1` API — the layer that picks a store per platform — excludes
