@@ -28,7 +28,7 @@ import type {
   TypingUser,
   VerificationRequestInfo,
 } from "../lib/types";
-import { isSasUpdate } from "../lib/types";
+import { isLiveVerification, isSasUpdate } from "../lib/types";
 
 export type RoomFilter = "all" | "unread" | "dms" | "muted";
 
@@ -129,7 +129,12 @@ interface State {
   sasState: SasStateInfo | null;
 
   // calls
-  callRoomId: string | null;
+  /**
+   * A DM whose call is ringing at us right now, and when it started ringing.
+   * Group calls never land here — they get a banner and a single chirp, the
+   * way they always have; a room of forty people all ringing is not a feature.
+   */
+  incomingCall: { roomId: string; since: number } | null;
 
   // toasts / errors
   banner: { tone: "error" | "info"; message: string } | null;
@@ -181,7 +186,10 @@ interface Actions {
   setSyncStatus(status: SyncStatus): void;
   setVerificationRequest(request: VerificationRequestInfo | null): void;
   applyVerificationUpdate(update: VerificationRequestInfo | SasStateInfo): void;
-  setCallRoom(roomId: string | null): void;
+  /** Start ringing for a DM call. Ignored if something is already ringing. */
+  ringIncomingCall(roomId: string): void;
+  /** Stop ringing — for one room, or unconditionally when `roomId` is omitted. */
+  stopIncomingCall(roomId?: string): void;
   showBanner(tone: "error" | "info", message: string): void;
   dismissBanner(): void;
   reset(): void;
@@ -216,7 +224,7 @@ const initial: State = {
   settings: prefs.load(),
   verificationRequest: null,
   sasState: null,
-  callRoomId: null,
+  incomingCall: null,
   banner: null,
 };
 
@@ -452,10 +460,31 @@ export const useStore = create<State & Actions>((set, get) => ({
   setSyncStatus: (syncStatus) => set({ syncStatus }),
 
   setVerificationRequest: (verificationRequest) =>
-    set({ verificationRequest, sasState: null }),
+    set((s) => {
+      // A request arriving while another is still running does not replace it.
+      // Abandoned flows are common — a retry leaves the first attempt open, and
+      // the other client announces a fresh one every time you press verify —
+      // and whichever arrived last used to win. That put a *stale* flow's id in
+      // the modal, so the buttons then acted on a verification nobody was
+      // looking at. `null` always wins: that is the user closing the dialog.
+      if (verificationRequest && isLiveVerification(s.verificationRequest)) {
+        return s.verificationRequest.flowId === verificationRequest.flowId ? s : {};
+      }
+      return { verificationRequest, sasState: null };
+    }),
 
   applyVerificationUpdate: (update) =>
-    set(() => {
+    set((s) => {
+      // Updates are addressed to a flow, and until now nothing checked which.
+      // Every abandoned verification keeps emitting — a superseded request is
+      // cancelled by the other side, sometimes minutes later — and that cancel
+      // would overwrite whatever was on screen. The symptom is the one that
+      // sent us looking: a verification that is going fine suddenly reads "not
+      // verified — the user cancelled", reporting the death of a flow the user
+      // had already forgotten about.
+      if (!s.verificationRequest || s.verificationRequest.flowId !== update.flowId) {
+        return {};
+      }
       if (isSasUpdate(update)) {
         // Only the SAS half moves. The request is deliberately left alone so
         // the modal stays up on completion and the user sees the outcome; it
@@ -470,7 +499,23 @@ export const useStore = create<State & Actions>((set, get) => ({
       return { verificationRequest: update };
     }),
 
-  setCallRoom: (callRoomId) => set({ callRoomId }),
+  ringIncomingCall: (roomId) =>
+    set((s) => {
+      // The first ring wins. A second DM calling while one is already ringing
+      // must not silently swap the room behind the answer button — the same
+      // way a second verification request does not displace a running one.
+      if (s.incomingCall) return {};
+      return { incomingCall: { roomId, since: Date.now() } };
+    }),
+
+  stopIncomingCall: (roomId) =>
+    set((s) => {
+      // Addressed by room, so a call ending somewhere else cannot silence the
+      // one the user is being asked about.
+      if (!s.incomingCall) return {};
+      if (roomId && s.incomingCall.roomId !== roomId) return {};
+      return { incomingCall: null };
+    }),
 
   showBanner: (tone, message) => set({ banner: { tone, message } }),
   dismissBanner: () => set({ banner: null }),

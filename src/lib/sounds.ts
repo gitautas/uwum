@@ -166,11 +166,12 @@ function audio(): AudioContext | null {
   }
 }
 
-function playNotes(notes: Note[], volume: number): void {
+function playNotes(notes: Note[], volume: number): OscillatorNode[] {
   const ctx = audio();
-  if (!ctx || volume <= 0) return;
+  if (!ctx || volume <= 0) return [];
 
   const start = ctx.currentTime + 0.01;
+  const started: OscillatorNode[] = [];
 
   for (const note of notes) {
     const osc = ctx.createOscillator();
@@ -198,7 +199,10 @@ function playNotes(notes: Note[], volume: number): void {
     osc.connect(gain).connect(ctx.destination);
     osc.start(at);
     osc.stop(end + 0.02);
+    started.push(osc);
   }
+
+  return started;
 }
 
 /**
@@ -219,3 +223,48 @@ export const playMessageSound = (id: string, volume: number) =>
 
 export const playCallSound = (id: string, volume: number) =>
   play(CALL_SOUNDS, id, volume);
+
+/** When the last note ends, so a repeat can be timed off the sound itself. */
+function length(sound: Sound): number {
+  return sound.notes.reduce((end, note) => Math.max(end, note.at + note.dur), 0);
+}
+
+/** Silence between one ring and the next. A phone breathes between rings. */
+const RING_GAP = 1.6;
+
+/**
+ * Ring until the returned function is called.
+ *
+ * Repeats are scheduled one burst at a time rather than queued up front, so
+ * stopping is immediate: the oscillators still sounding are stopped by hand,
+ * because an answered call has to go quiet the moment it is answered, not at
+ * the end of whichever note was already playing.
+ *
+ * Returns a no-op stopper when there is nothing to play — `"none"`, an unknown
+ * id, or a build with no Web Audio — so callers never have to special-case it.
+ */
+export function startRinging(id: string, volume: number): () => void {
+  const sound = id === NONE ? null : find(CALL_SOUNDS, id);
+  if (!sound || volume <= 0) return () => {};
+
+  let ringing: OscillatorNode[] = [];
+
+  const once = () => {
+    ringing = playNotes(sound.notes, volume);
+  };
+
+  once();
+  const timer = window.setInterval(once, (length(sound) + RING_GAP) * 1000);
+
+  return () => {
+    window.clearInterval(timer);
+    for (const osc of ringing) {
+      try {
+        osc.stop();
+      } catch {
+        // Already stopped, or the context went away underneath us.
+      }
+    }
+    ringing = [];
+  };
+}

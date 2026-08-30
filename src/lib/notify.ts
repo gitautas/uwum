@@ -17,6 +17,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import type { PluginListener } from "@tauri-apps/api/core";
 
+import { call } from "./call";
 import { playCallSound, playMessageSound } from "./sounds";
 import type { RoomSummary } from "./types";
 import { useStore } from "../store";
@@ -114,7 +115,12 @@ function describe(room: RoomSummary): { title: string; body: string } {
 }
 
 function inspect(rooms: RoomSummary[], seen: Map<string, Seen>): void {
-  const { settings, callRoomId } = useStore.getState();
+  const { settings, incomingCall, ringIncomingCall, stopIncomingCall } = useStore.getState();
+  // The call we are *in*, straight from the controller that runs it. This used
+  // to read a `callRoomId` in the store that nothing ever assigned, so the
+  // guard below quietly did nothing and starting a call notified you about
+  // your own call. Harmless as a stray banner; not harmless once it rings.
+  const callRoomId = call.getState().roomId;
   let ring = false;
   let chirp = false;
 
@@ -141,6 +147,14 @@ function inspect(rooms: RoomSummary[], seen: Map<string, Seen>): void {
       }
     }
 
+    // A call that has ended stops ringing, however it ended — the caller hung
+    // up, or someone else in the room answered it. Checked before the start
+    // below so a call that begins and ends inside one batch doesn't get stuck
+    // ringing at nobody.
+    if (!room.hasActiveCall && incomingCall?.roomId === room.id) {
+      stopIncomingCall(room.id);
+    }
+
     // Someone started a call in a room you're in — but not the call you're
     // already sitting in, which is where `hasActiveCall` also goes true.
     if (
@@ -150,8 +164,16 @@ function inspect(rooms: RoomSummary[], seen: Map<string, Seen>): void {
       !previous.call &&
       room.id !== callRoomId
     ) {
-      notify(room.name, "call starting~", room.id);
-      ring = true;
+      notify(room.name, room.isDirect ? "calling~" : "call starting~", room.id);
+
+      // A DM is one person calling *you*, so it rings until you deal with it.
+      // A group call is an announcement — forty people cannot all be expected
+      // to answer, and forty ringing phones is how you get a muted room.
+      if (room.isDirect) {
+        ringIncomingCall(room.id);
+      } else {
+        ring = true;
+      }
     }
   }
 

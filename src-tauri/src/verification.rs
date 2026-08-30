@@ -12,7 +12,8 @@ use futures_util::StreamExt;
 use matrix_sdk::{
     Client,
     encryption::verification::{
-        SasState, SasVerification, Verification, VerificationRequest, VerificationRequestState,
+        CancelInfo, SasState, SasVerification, Verification, VerificationRequest,
+        VerificationRequestState,
     },
     ruma::{
         UserId,
@@ -50,6 +51,15 @@ pub struct VerificationRequestDto {
     /// Why the flow ended, when it ended badly and before SAS ever started —
     /// otherwise there is nothing to show the user but "it stopped".
     pub cancel_reason: Option<String>,
+    /// Which side sent the cancel. Without this the UI has to guess, and it
+    /// guessed wrong in the direction that matters: `m.user` reads as "the
+    /// user cancelled", which a reader takes to mean *them*, when half the
+    /// time it was this device.
+    pub cancelled_by_us: Option<bool>,
+    /// The spec code (`m.user`, `m.timeout`, `m.unknown_method`, …). The
+    /// human-readable reason collapses distinct failures into similar
+    /// sentences; the code is what makes a bug report actionable.
+    pub cancel_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -63,6 +73,8 @@ pub struct SasStateDto {
     pub emoji: Option<Vec<SasEmoji>>,
     pub decimals: Option<[u16; 3]>,
     pub cancel_reason: Option<String>,
+    pub cancelled_by_us: Option<bool>,
+    pub cancel_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -83,23 +95,40 @@ fn request_state_name(state: &VerificationRequestState) -> &'static str {
     }
 }
 
-fn to_dto(request: &VerificationRequest) -> VerificationRequestDto {
+/// The one place a request becomes a DTO — for the opening announcement and for
+/// every change after it. These were two copies before, and they had already
+/// drifted: the change path built the struct by hand, so a field added to
+/// `to_dto` reached the UI on the first event and never again.
+fn to_dto(request: &VerificationRequest, state: &VerificationRequestState) -> VerificationRequestDto {
+    let cancel = match state {
+        VerificationRequestState::Cancelled(info) => Some(info),
+        _ => None,
+    };
+
     VerificationRequestDto {
         flow_id: request.flow_id().to_owned(),
         other_user_id: request.other_user_id().to_string(),
         other_device_id: None,
         is_self_verification: request.is_self_verification(),
         we_started: request.we_started(),
-        state: request_state_name(&request.state()).to_owned(),
-        cancel_reason: request_cancel_reason(&request.state()),
+        state: request_state_name(state).to_owned(),
+        cancel_reason: cancel.map(|c| c.reason().to_owned()),
+        cancelled_by_us: cancel.map(CancelInfo::cancelled_by_us),
+        cancel_code: cancel.map(|c| c.cancel_code().as_str().to_owned()),
     }
 }
 
-fn request_cancel_reason(state: &VerificationRequestState) -> Option<String> {
-    match state {
-        VerificationRequestState::Cancelled(info) => Some(info.reason().to_owned()),
-        _ => None,
-    }
+/// A cancelled flow is the one outcome the user is owed an explanation for, and
+/// the one hardest to reconstruct afterwards — it looks identical in the UI
+/// whether we sent the cancel, they did, or a timeout did. Log the attribution
+/// at `warn` so a failed verification leaves a trail.
+fn log_cancel(flow_id: &str, what: &str, info: &CancelInfo) {
+    tracing::warn!(
+        "{what} verification {flow_id} cancelled by {} — {} ({})",
+        if info.cancelled_by_us() { "us" } else { "them" },
+        info.cancel_code().as_str(),
+        info.reason(),
+    );
 }
 
 /// Register handlers for incoming verification requests and keep them running
@@ -154,25 +183,18 @@ pub async fn watch_requests(app: AppHandle, core: Arc<MatrixCore>) {
 
 /// Tell the UI about a request, then follow it until it resolves.
 async fn announce(app: AppHandle, core: Arc<MatrixCore>, request: VerificationRequest) {
-    emit(&app, EV_VERIFICATION_REQUEST, to_dto(&request));
+    emit(&app, EV_VERIFICATION_REQUEST, to_dto(&request, &request.state()));
 
     tokio::spawn(async move {
         let is_self = request.is_self_verification();
+        let flow_id = request.flow_id().to_owned();
         let mut changes = request.changes();
         while let Some(state) = changes.next().await {
-            emit(
-                &app,
-                EV_VERIFICATION_UPDATE,
-                VerificationRequestDto {
-                    flow_id: request.flow_id().to_owned(),
-                    other_user_id: request.other_user_id().to_string(),
-                    other_device_id: None,
-                    is_self_verification: request.is_self_verification(),
-                    we_started: request.we_started(),
-                    state: request_state_name(&state).to_owned(),
-                    cancel_reason: request_cancel_reason(&state),
-                },
-            );
+            if let VerificationRequestState::Cancelled(info) = &state {
+                log_cancel(&flow_id, "request", info);
+            }
+
+            emit(&app, EV_VERIFICATION_UPDATE, to_dto(&request, &state));
 
             // Once the other side picks SAS, start reporting emoji instead.
             if let VerificationRequestState::Transitioned { verification, .. } = &state
@@ -279,20 +301,38 @@ fn sas_dto(sas: &SasVerification, flow_id: &str, state: &SasState) -> SasStateDt
             .collect()
     });
 
+    let cancel = sas.cancel_info();
+
     SasStateDto {
         flow_id: flow_id.to_owned(),
         other_user_id: sas.other_user_id().to_string(),
         state: name.to_owned(),
         emoji,
         decimals: sas.decimals().map(|(a, b, c)| [a, b, c]),
-        cancel_reason: sas.cancel_info().map(|info| info.reason().to_owned()),
+        cancel_reason: cancel.as_ref().map(|c| c.reason().to_owned()),
+        cancelled_by_us: cancel.as_ref().map(CancelInfo::cancelled_by_us),
+        cancel_code: cancel.as_ref().map(|c| c.cancel_code().as_str().to_owned()),
     }
 }
 
 fn watch_sas(app: AppHandle, sas: SasVerification, flow_id: String) {
     tokio::spawn(async move {
+        // Subscribe *before* reading the current state. `changes()` only ever
+        // yields transitions that happen after the call — it does not replay
+        // where the SAS already is — so the state has to be read separately or
+        // it is lost. Taking the subscription first makes the race harmless in
+        // the only direction that matters: a transition landing in between is
+        // queued and seen twice, rather than missed.
+        //
+        // This is not a corner case. `watch_sas` is spawned when the request
+        // reaches `Transitioned`, and by then the SAS is frequently in
+        // `Started` already — so the `accept()` below never ran, no emoji ever
+        // arrived, and the flow sat there until the other client gave up.
         let mut changes = sas.changes();
-        while let Some(state) = changes.next().await {
+        let mut state = sas.state();
+        let mut accepted = false;
+
+        loop {
             // `Started` means *they* sent the `m.key.verification.start` and we
             // are the side that has to answer with an `m.key.verification.accept`
             // before either device will send a key. Nothing in the SDK does this
@@ -306,16 +346,24 @@ fn watch_sas(app: AppHandle, sas: SasVerification, flow_id: String) {
             // larger device ID — so on roughly half of all verifications *our*
             // start is the one thrown away and theirs is the one we must accept.
             // That is why this failed for some people and not others.
-            if matches!(state, SasState::Started { .. })
-                && let Err(e) = sas.accept().await
-            {
-                tracing::error!("couldn't accept SAS verification {flow_id}: {e}");
+            if matches!(state, SasState::Started { .. }) && !accepted {
+                accepted = true;
+                if let Err(e) = sas.accept().await {
+                    tracing::error!("couldn't accept SAS verification {flow_id}: {e}");
+                }
+            }
+
+            if let SasState::Cancelled(info) = &state {
+                log_cancel(&flow_id, "sas", info);
             }
 
             emit(&app, EV_VERIFICATION_UPDATE, sas_dto(&sas, &flow_id, &state));
             if matches!(state, SasState::Done { .. } | SasState::Cancelled(_)) {
                 break;
             }
+
+            let Some(next) = changes.next().await else { break };
+            state = next;
         }
     });
 }

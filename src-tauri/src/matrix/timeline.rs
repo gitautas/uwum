@@ -95,33 +95,68 @@ pub async fn open(
 
     let (initial, stream) = timeline.subscribe().await;
 
-    let task = {
-        let app = app.clone();
-        let core = core.clone();
-        let key = key.clone();
+    // Claim the slot *before* spawning the task that emits.
+    //
+    // Two opens for the same key can be in flight at once: nothing waits for
+    // one to finish, so flicking A → B → A starts a second while the first is
+    // still building. The check at the top of this function was true when it
+    // ran and is several awaits out of date by now, so both callers reach here
+    // believing the timeline is theirs to create.
+    //
+    // The old order was spawn-then-insert. Both spawned, both streamed the same
+    // room under the same key, and the UI applied every message twice — until
+    // the second `insert` dropped the first `OpenTimeline` and aborted it. That
+    // is why the duplicates were occasional, varied in number, and vanished on
+    // restart: they were whatever landed inside the overlap, left behind in a
+    // list nothing ever deduplicated.
+    //
+    // Spawning only after winning the slot means the loser never creates an
+    // emitter at all. Subscribing first costs nothing — the stream buffers, so
+    // no change between `subscribe` and `spawn` is missed.
+    let lost_to = {
+        let mut open = core.timelines.lock().await;
+        match open.get(&key) {
+            Some(existing) => Some(existing.timeline.clone()),
+            None => {
+                let task = {
+                    let app = app.clone();
+                    let core = core.clone();
+                    let key = key.clone();
+                    let own_user = own_user.clone();
 
-        tokio::spawn(async move {
-            pin_mut!(stream);
-            while let Some(diffs) = stream.next().await {
-                if core.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
-                    break;
-                }
-                let converted: Vec<_> =
-                    diffs.into_iter().map(|d| convert_diff(d, &own_user)).collect();
+                    tokio::spawn(async move {
+                        pin_mut!(stream);
+                        while let Some(diffs) = stream.next().await {
+                            if core.shutting_down.load(std::sync::atomic::Ordering::SeqCst) {
+                                break;
+                            }
+                            let converted: Vec<_> =
+                                diffs.into_iter().map(|d| convert_diff(d, &own_user)).collect();
 
-                emit(
-                    &app,
-                    EV_TIMELINE,
-                    TimelineUpdate { room_id: key.clone(), diffs: converted },
-                );
+                            emit(
+                                &app,
+                                EV_TIMELINE,
+                                TimelineUpdate { room_id: key.clone(), diffs: converted },
+                            );
+                        }
+                    })
+                };
+
+                open.insert(key.clone(), OpenTimeline { timeline, task });
+                None
             }
-        })
+        }
     };
 
-    let own_user = core.own_user_id()?;
-    let items: Vec<_> = initial.iter().map(|i| convert_timeline_item(i, &own_user)).collect();
+    // Lost the race. The timeline built above is dropped with nothing watching
+    // it; the winner's is the one emitting, so report *its* items — ours could
+    // already disagree with what the UI is about to be sent diffs against.
+    if let Some(existing) = lost_to {
+        let items = existing.items().await;
+        return Ok(items.iter().map(|i| convert_timeline_item(i, &own_user)).collect());
+    }
 
-    core.timelines.lock().await.insert(key, OpenTimeline { timeline, task });
+    let items: Vec<_> = initial.iter().map(|i| convert_timeline_item(i, &own_user)).collect();
 
     // Typing notices only matter for the room the user is actually looking at.
     if thread_root.is_none()

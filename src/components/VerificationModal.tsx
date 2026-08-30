@@ -1,6 +1,7 @@
 import { useShallow } from "zustand/react/shallow";
 
 import { localpart } from "../lib/display";
+import type { SasStateInfo } from "../lib/types";
 import * as ipc from "../lib/ipc";
 import { useStore } from "../store";
 import { Button, Icon } from "./ui";
@@ -124,11 +125,7 @@ export function VerificationModal() {
               icon="warning-circle"
               colour="var(--status-danger)"
               title="not verified"
-              body={
-                sas?.cancelReason ??
-                request.cancelReason ??
-                "the verification was cancelled. nothing has changed — you can try again."
-              }
+              body={cancelBody(sas?.cancelCode ? sas : request, who)}
             />
           ) : emoji ? (
             <>
@@ -233,6 +230,33 @@ export function VerificationModal() {
       </div>
     </div>
   );
+}
+
+/**
+ * Say who cancelled, because the SDK's own wording doesn't.
+ *
+ * Its reason for `m.user` is "The user cancelled the verification" — the same
+ * sentence whichever side sent it, and a reader takes "the user" to mean the
+ * other one. Half the time it was this device, and a user told the other person
+ * gave up when they didn't goes looking in the wrong place. `cancelledByUs` is
+ * the only thing that settles it.
+ */
+function cancelBody(
+  info: Pick<SasStateInfo, "cancelReason" | "cancelledByUs" | "cancelCode">,
+  who: string,
+): string {
+  const retry = "nothing has changed — you can try again.";
+
+  if (info.cancelCode === "m.timeout") return `nobody answered in time. ${retry}`;
+  if (info.cancelCode === "m.user") {
+    return info.cancelledByUs
+      ? `the verification was cancelled from this device. ${retry}`
+      : `${who} cancelled the verification. ${retry}`;
+  }
+  if (info.cancelReason) {
+    return `${info.cancelReason.replace(/\.$/, "").toLowerCase()} — ${retry}`;
+  }
+  return `the verification was cancelled. ${retry}`;
 }
 
 function Outcome({

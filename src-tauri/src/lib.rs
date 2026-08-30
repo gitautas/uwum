@@ -12,6 +12,8 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_crypto_provider();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
@@ -130,6 +132,23 @@ pub fn run() {
                 });
             }
         });
+}
+
+/// Settle rustls on one crypto backend before anything can open a connection.
+///
+/// `rustls` normally works this out from its own crate features, but ours has
+/// both `aws-lc-rs` and `ring` switched on by different dependencies, and it
+/// treats that as ambiguous rather than picking one: the lookup returns `None`
+/// and the caller panics. That panic lands on a tokio worker, so the symptom is
+/// not a crash but a `Promise` that never settles — a spinner that spins for
+/// ever, with the reason only in the log.
+///
+/// Naming the provider here removes the ambiguity for the whole process. It has
+/// to happen before the first handshake, which in practice means before Tauri
+/// starts anything. `install_default` fails only if a provider is already
+/// installed, and that outcome is just as good as ours.
+fn install_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 }
 
 /// Put "settings…" in the app menu, with the shortcut every mac app uses.

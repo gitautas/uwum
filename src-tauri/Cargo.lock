@@ -6651,6 +6651,7 @@ dependencies = [
  "mime_guess",
  "rand 0.9.5",
  "reqwest 0.12.28",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
