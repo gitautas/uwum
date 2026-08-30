@@ -5,6 +5,7 @@ import { useShallow } from "zustand/react/shallow";
 import * as ipc from "./lib/ipc";
 import { startNotifications } from "./lib/notify";
 import { startRinger } from "./lib/ringer";
+import { startUpdateChecks } from "./lib/update";
 import { resetPresence } from "./lib/presence";
 import { applyAccent, load as loadSettings } from "./lib/settings";
 import type { RoomSummary } from "./lib/types";
@@ -21,6 +22,7 @@ import { RoomList } from "./components/RoomList";
 import { SettingsView } from "./components/SettingsView";
 import { SpacesRail } from "./components/SpacesRail";
 import { IncomingCallModal } from "./components/IncomingCallModal";
+import { UpdateBanner } from "./components/UpdateNotice";
 import { VerificationModal } from "./components/VerificationModal";
 import { BackdropPattern, dragRegion, Icon, Spinner } from "./components/ui";
 
@@ -164,6 +166,7 @@ function Shell() {
       <IncomingCallModal />
       <VerificationModal />
       <SyncIndicator />
+      <UpdateBanner />
 
       {banner && (
         <div
@@ -371,6 +374,9 @@ function useAppShortcuts() {
 function useNotifications() {
   useEffect(() => startNotifications(), []);
   useEffect(() => startRinger(), []);
+  // Same lifetime as the rest: nothing should be polling for releases behind a
+  // login screen, and signing out stops the timer with everything else.
+  useEffect(() => startUpdateChecks(), []);
 }
 
 /**

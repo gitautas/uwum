@@ -73,6 +73,16 @@ rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs"] 
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2"
 
+# The updater is a desktop-only story: it replaces an .app, an AppImage or an
+# NSIS install in place, and none of those exist on a phone. Android and iOS get
+# their updates from wherever the .apk/.ipa was installed from, so the plugin is
+# not compiled there at all — see `update.rs` for the fallback they get instead.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+# Only for `restart`, which is how an installed update actually takes effect.
+tauri-plugin-process = "2"
+
+
 # Reaching into the WebView to switch WebRTC on (see `enable_webrtc` in lib.rs).
 # The version is pinned to the exact one wry depends on — `with_webview` hands
 # back wry's own `webkit2gtk::WebView`, and two different semver-compatible

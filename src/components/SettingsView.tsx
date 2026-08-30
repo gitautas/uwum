@@ -29,6 +29,7 @@ import { useStore } from "../store";
 import { PacksSection } from "./PackSettings";
 import { Card, Field, Heading, inputStyle, Row } from "./settingsUi";
 import { Avatar, Button, dragRegion, Icon, RaveLabel, Spinner, Toggle } from "./ui";
+import { UpdateSettings } from "./UpdateNotice";
 
 type Section =
   | "account"
@@ -1169,6 +1170,8 @@ function AboutSection() {
           <div>voice over matrixrtc + livekit</div>
         </div>
       </Card>
+
+      <UpdateSettings />
     </>
   );
 }

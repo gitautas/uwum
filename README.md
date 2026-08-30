@@ -64,6 +64,38 @@ Locally, neither is needed — a debug build signs itself, and
 `src-tauri/gen/android/keystore.properties` (gitignored) is read if you want to
 sign a local release build.
 
+## Updates
+
+Every `v*` tag produces one release that serves both halves of distribution: the
+installers people download for the first time, and `latest.json` — the manifest
+the installed app polls. They are built from the same run, and the release only
+leaves draft once every platform's assets are attached, so the app can never be
+offered a version that isn't fully published.
+
+The app can only *apply* an update where it owns the install: macOS, Windows,
+and Linux via AppImage. A `.deb`, an `.apk` and an `.ipa` belong to apt or to
+the phone, so those builds say a new version exists and open the release page
+instead. Which of the two applies is decided in `src-tauri/src/update.rs`, not
+guessed in the frontend — on Linux the same binary ships both ways.
+
+Updates are signed, and the app installs nothing the key below did not sign. The
+public half lives in `tauri.conf.json` (`plugins.updater.pubkey`); the private
+half must exist in the repository's Actions secrets, or a tag fails immediately:
+
+| Secret | What it is |
+| --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | the contents of the `.key` from `tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | the password set when generating it |
+
+Like the Android keystore, this key cannot be rotated freely: an app only
+accepts updates signed by the key **it** was built with, so a new key strands
+every copy already installed until its owner downloads a build by hand. Keep the
+private key and its password somewhere they outlive the machine that made them.
+
+```bash
+npm run tauri signer generate -- -w ~/.tauri/uwum-updater.key
+```
+
 ## What works
 
 Login (password and SSO), session persistence in the OS keychain, sliding sync,

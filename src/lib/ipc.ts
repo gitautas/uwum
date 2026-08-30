@@ -38,6 +38,8 @@ import type {
   TimelineItem,
   TimelineUpdate,
   TypingUpdate,
+  LatestRelease,
+  UpdateMode,
   UserContext,
   UwuError,
   VerificationRequestInfo,
@@ -501,3 +503,17 @@ export const photosRecent = (limit: number) =>
  * drag-and-drop already use.
  */
 export const photosExport = (id: string) => invoke<string>("photos_export", { id });
+
+// ---------------------------------------------------------------------------
+// updates
+// ---------------------------------------------------------------------------
+
+/** Whether this build can install its own updates. See `update.rs`. */
+export const updateMode = () => invoke<UpdateMode>("update_mode");
+
+/** The newest published release, for builds that have to be updated by hand. */
+export const latestRelease = () => invoke<LatestRelease>("latest_release");
+
+/** Is `latest` newer than the version this binary was built as? */
+export const updateAvailable = (latest: string) =>
+  invoke<boolean>("update_available", { latest });

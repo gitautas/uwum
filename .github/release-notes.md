@@ -1,5 +1,11 @@
 <!-- Prepend the changelog for this release above this line before publishing. -->
 
+## Updating
+
+The macOS, Windows and AppImage builds update themselves: they check on launch
+and offer the new version in-app. The `.deb`, `.apk` and `.ipa` are installed by
+something else, so those tell you a release is out and send you back here.
+
 ## Installing
 
 These builds are **not code-signed** yet, so each OS warns on first launch. This is
