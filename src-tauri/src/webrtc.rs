@@ -3,9 +3,8 @@
 //!
 //! macOS, Windows, iOS and Android all hand us a WebView with a working WebRTC
 //! stack. Linux does not, so everything below is `target_os = "linux"` under a
-//! thin cross-platform surface: [`diagnosis`] returns `None` and [`recover`]
-//! returns `false` everywhere else, which is how the frontend knows the WebView
-//! isn't the suspect.
+//! thin cross-platform surface: `webrtc_diagnosis` returns `None` everywhere
+//! else, which is how the frontend knows the WebView isn't the suspect.
 
 use serde::Serialize;
 
@@ -17,9 +16,12 @@ use serde::Serialize;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnosis {
-    /// `enable-webrtc` as WebKitGTK reported it back *after* we set it. A build
-    /// without `-DENABLE_WEB_RTC=ON` keeps the property but ignores the setter,
-    /// so `false` here means this WebKitGTK can never do WebRTC.
+    /// `enable-webrtc` as WebKitGTK reported it back *after* we set it.
+    ///
+    /// Worth reporting, worth nothing on its own: where WebRTC is compiled out
+    /// the property is a stub that stores whatever it is given, so this reads
+    /// back `true` on a WebKitGTK that has no WebRTC in it at all. Only a
+    /// `false` here says anything — that the setter didn't even take.
     pub setting_enabled: bool,
     /// Same, for `enable-media-stream` — the one that puts `mediaDevices` on
     /// `navigator`.
@@ -35,11 +37,9 @@ pub struct Diagnosis {
     /// Is `libgstnice.so` (gstreamer1.0-nice) installed? That's ICE; without it
     /// a connection can be created but never gathers a candidate.
     pub gst_nice: bool,
-    /// Running from an AppImage, which carries its own WebKitGTK but *not* the
-    /// GStreamer plugins it would need.
+    /// Running from an AppImage, which carries its own WebKitGTK — so the
+    /// version above is that one, not whatever the distribution installed.
     pub appimage: bool,
-    /// Have we already reloaded the WebView once to shake the settings loose?
-    pub reloaded: bool,
 }
 
 /// What the native side knows about this WebView, or `None` off Linux.
@@ -52,24 +52,6 @@ pub fn webrtc_diagnosis() -> Option<Diagnosis> {
     #[cfg(not(target_os = "linux"))]
     {
         None
-    }
-}
-
-/// Reload the WebView once, in case the document was created before our
-/// settings landed. `true` if a reload was actually started.
-///
-/// See [`linux::recover`] for why a reload is the fix and why it is capped at
-/// one per process.
-#[tauri::command]
-pub fn webrtc_recover(window: tauri::WebviewWindow) -> bool {
-    #[cfg(target_os = "linux")]
-    {
-        linux::recover(&window)
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = window;
-        false
     }
 }
 
@@ -92,9 +74,6 @@ mod linux {
     /// the setup hook never ran, which is itself worth reporting.
     static WEBRTC_SETTING: AtomicBool = AtomicBool::new(false);
     static MEDIA_STREAM_SETTING: AtomicBool = AtomicBool::new(false);
-    /// One recovery reload per process, no more — a WebKitGTK that simply can't
-    /// do WebRTC would otherwise reload for ever.
-    static RELOADED: AtomicBool = AtomicBool::new(false);
 
     /// Turn on WebRTC in the WebView on Linux.
     ///
@@ -123,10 +102,11 @@ mod linux {
     /// empty label, so the device picker in call settings shows a list of
     /// blanks.
     ///
-    /// None of this helps if the distribution compiled WebKitGTK without
-    /// `-DENABLE_WEB_RTC=ON`, or if `webrtcbin` (gst-plugins-bad) is missing at
-    /// runtime — hence the package dependencies in `tauri.conf.json`, and
-    /// [`diagnosis`] for the machines that have neither.
+    /// None of this helps on the WebKitGTK people actually have. `ENABLE_WEB_RTC`
+    /// defaults to `ENABLE_EXPERIMENTAL_FEATURES`, which is `OFF`, and no major
+    /// distribution overrides it — so WebRTC is compiled out and there is no
+    /// setting that can bring it back. Everything here is for the WebKitGTK
+    /// that *was* built with it; [`diagnosis`] is for all the rest.
     pub fn enable(app: &tauri::App) -> tauri::Result<()> {
         let Some(window) = app.get_webview_window("main") else {
             tracing::warn!("no main window at setup; WebRTC left disabled");
@@ -148,10 +128,11 @@ mod linux {
                 // `navigator`.
                 settings.set_enable_media_stream(true);
                 settings.set_enable_webrtc(true);
-                // Read back rather than trust the setters. A WebKitGTK built
-                // without -DENABLE_WEB_RTC still carries the property, so a
-                // silent no-op here is the one failure mode we can detect from
-                // inside — and the one the frontend needs to hear about.
+                // Read back rather than trust the setters — though the
+                // read-back is not the tell it looks like: WebKitGTK stores
+                // these properties whether or not there is any WebRTC behind
+                // them. `false` would mean the setter didn't take; `true` means
+                // only that it was stored.
                 let webrtc = settings.enables_webrtc();
                 let media_stream = settings.enables_media_stream();
                 WEBRTC_SETTING.store(webrtc, Ordering::Relaxed);
@@ -187,35 +168,7 @@ mod linux {
             gst_webrtc: gst_plugin("libgstwebrtc.so"),
             gst_nice: gst_plugin("libgstnice.so"),
             appimage: std::env::var_os("APPIMAGE").is_some(),
-            reloaded: RELOADED.load(Ordering::Relaxed),
         }
-    }
-
-    /// Reload the WebView once, to give WebRTC a document created *after* the
-    /// settings were applied.
-    ///
-    /// `with_webview` can only run once the event loop is turning, which is
-    /// after wry has already told WebKit to load our page. Preferences travel
-    /// to the web process asynchronously, and the DOM window decides which
-    /// constructors exist when it is created: land the setting a moment late
-    /// and `RTCPeerConnection` is missing from a document that would otherwise
-    /// have had it. A reload is the cheap way out — the frontend is a local
-    /// asset, the session lives in Rust, and this happens before anyone has
-    /// signed in.
-    ///
-    /// It is capped at one per process because the other causes (a WebKitGTK
-    /// without WebRTC, a missing `webrtcbin`) look identical from JavaScript
-    /// and no amount of reloading fixes them.
-    pub fn recover(window: &tauri::WebviewWindow) -> bool {
-        if RELOADED.swap(true, Ordering::SeqCst) {
-            return false;
-        }
-        tracing::info!("no RTCPeerConnection in the document; reloading the WebView once");
-        let _ = window.with_webview(|platform| {
-            use webkit2gtk::WebViewExt;
-            platform.inner().reload();
-        });
-        true
     }
 
     /// WebKitGTK's runtime version, which is what matters — the crate we build

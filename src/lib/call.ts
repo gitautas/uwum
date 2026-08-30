@@ -81,64 +81,34 @@ export function screenShareSupported(): boolean {
 }
 
 /**
- * Give the WebView one chance to come back with a WebRTC stack.
+ * Why this WebView has no WebRTC, in a sentence that names something real.
  *
- * On Linux we have to switch WebRTC on ourselves, and that can only happen once
- * the event loop is turning — a moment after WebKit has been told to load the
- * page. The DOM window decides which constructors exist when it is created, so
- * losing that race costs us `RTCPeerConnection` for the life of the document.
- * A reload gets a document created after the setting landed; Rust caps it at
- * one per process, so a WebKitGTK that simply can't do WebRTC won't loop.
- *
- * Everywhere else this returns without a round trip.
- */
-export async function ensureWebrtc(): Promise<void> {
-  if (typeof RTCPeerConnection !== "undefined") return;
-  await ipc.webrtcRecover().catch(() => false);
-}
-
-/**
- * Why this WebView has no WebRTC, in a sentence that names something to do
- * about it.
- *
- * All four causes look identical from JavaScript — the constructor is simply
- * absent — so the native side is the only place that can tell them apart.
+ * The causes are indistinguishable from JavaScript — the constructor is simply
+ * absent — and one of them is indistinguishable from the native side too:
+ * WebKitGTK stores `enable-webrtc` whether or not there is any WebRTC behind
+ * it, so a build with WebRTC compiled out looks, from every API we can reach,
+ * exactly like one that has it. That is also the usual case, so it is what we
+ * say when nothing else explains it.
  */
 async function describeMissingWebrtc(): Promise<string> {
   const info = await ipc.webrtcDiagnosis().catch(() => null);
   if (!info) {
     return "this webview has no webrtc stack, so calls can't work here.";
   }
-  if (!info.settingEnabled) {
-    return (
-      `webkitgtk ${info.webkitVersion} here was built without webrtc, so voice ` +
-      "can't work in this webview. a distribution build of webkitgtk 2.40 or " +
-      "newer is the fix."
-    );
-  }
-  if (!info.gstWebrtc) {
-    return (
-      "gstreamer's webrtc plugin is missing, which is what webkitgtk calls for " +
-      "media. install gstreamer1.0-plugins-bad (gstreamer1-plugins-bad-free on " +
-      "fedora) and restart uwum."
-    );
-  }
-  if (!info.gstNice) {
-    return (
-      "gstreamer's ice plugin is missing, so a call could never find a route. " +
-      "install gstreamer1.0-nice (libnice-gstreamer1 on fedora) and restart uwum."
-    );
-  }
-  if (info.appimage) {
-    return (
-      "the appimage's webkitgtk came up without webrtc. the .deb or .rpm pulls " +
-      "in the system webkitgtk and the gstreamer plugins with it — try one of " +
-      "those instead."
-    );
-  }
+  const missing = [
+    info.gstWebrtc ? null : "gst-plugins-bad",
+    info.gstNice ? null : "gstreamer's libnice",
+  ].filter(Boolean);
+  const webkit = info.appimage
+    ? `the appimage's webkitgtk ${info.webkitVersion}`
+    : `webkitgtk ${info.webkitVersion}`;
+
   return (
-    `webkitgtk ${info.webkitVersion} says webrtc is on but this page didn't get ` +
-    "it. restarting uwum usually settles it."
+    `voice can't work in this webview: ${webkit} was built without webrtc. ` +
+    "webkit leaves it off unless it is built with -DENABLE_WEB_RTC=ON, and no " +
+    "distribution turns it on" +
+    (missing.length ? `, and ${missing.join(" and ")} would be missing too` : "") +
+    "."
   );
 }
 

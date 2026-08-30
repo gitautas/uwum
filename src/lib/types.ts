@@ -595,7 +595,11 @@ export interface LatestRelease {
  * `src-tauri/src/webrtc.rs`.
  */
 export interface WebrtcDiagnosis {
-  /** `enable-webrtc`, read back from WebKitGTK after we set it. */
+  /**
+   * `enable-webrtc`, read back from WebKitGTK after we set it — which proves
+   * far less than it looks like: the property is a stub where WebRTC is
+   * compiled out, so it reads back `true` on a build that has none.
+   */
   settingEnabled: boolean;
   /** `enable-media-stream`, likewise. */
   mediaStreamEnabled: boolean;
@@ -607,6 +611,4 @@ export interface WebrtcDiagnosis {
   gstNice: boolean;
   /** Running from an AppImage, which brings its own WebKitGTK. */
   appimage: boolean;
-  /** Have we already spent our one recovery reload? */
-  reloaded: boolean;
 }

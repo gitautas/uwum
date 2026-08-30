@@ -19,6 +19,15 @@ macOS and iOS build today, and Android runs on a device. Linux and Windows are
 kept viable — no macOS-only crates, and both custom-protocol URL forms are
 handled — but neither is tested yet.
 
+**Voice does not work on Linux**, and not for a reason uwum can fix. The
+WebView there is WebKitGTK, whose `ENABLE_WEB_RTC` follows
+`ENABLE_EXPERIMENTAL_FEATURES` — off — and no distribution overrides it, so
+`RTCPeerConnection` does not exist however the `enable-webrtc` setting reads
+back. Everything else works; joining a call says so rather than failing
+obscurely. A WebKitGTK built with `-DENABLE_WEB_RTC=ON` (plus gst-plugins-bad
+and libnice, which the packages already depend on) is the only thing that
+changes it.
+
 Android needs an SDK, an NDK and a JDK. `npm run android` finds all three
 itself if they are installed; from nothing, that is:
 

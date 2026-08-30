@@ -521,6 +521,3 @@ export const updateAvailable = (latest: string) =>
 
 /** What the native side knows about WebRTC here; `null` where it always works. */
 export const webrtcDiagnosis = () => invoke<WebrtcDiagnosis | null>("webrtc_diagnosis");
-
-/** Reload the WebView once, to shake a late WebRTC setting loose. */
-export const webrtcRecover = () => invoke<boolean>("webrtc_recover");

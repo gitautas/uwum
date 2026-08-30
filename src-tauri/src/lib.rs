@@ -125,7 +125,6 @@ pub fn run() {
             update::latest_release,
             // webrtc
             webrtc::webrtc_diagnosis,
-            webrtc::webrtc_recover,
         ])
         .setup(|app| {
             // Read only by the platform-gated calls below; on iOS/Android

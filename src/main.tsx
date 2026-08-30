@@ -17,15 +17,8 @@ import "@fontsource-variable/jetbrains-mono";
 import "@phosphor-icons/web/fill";
 
 import App from "./App";
-import { ensureWebrtc } from "./lib/call";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./styles/index.css";
-
-// Before anything asks for a microphone: on Linux the WebView can come up
-// without a WebRTC stack, and only a reload can give it one. Fire and forget —
-// it is a no-op on every other platform, and a reload here costs nothing
-// because nobody has signed in yet.
-void ensureWebrtc();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
