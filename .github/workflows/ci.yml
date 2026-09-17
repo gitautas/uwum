@@ -31,3 +31,37 @@ jobs:
       - run: npm run build
 
       - run: npm test
+
+  # The Linux WebView needs code no other platform compiles (see
+  # `src-tauri/src/webrtc.rs`), and until this job existed the only thing that
+  # ever built it was a release tag — the worst place to find a typo. Clippy
+  # type-checks the whole crate, so it catches that and reads the code too;
+  # warnings are left non-fatal on purpose, since the crate has some already.
+  rust:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            libdbus-1-dev pkg-config patchelf xdg-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+          key: ci-linux
+
+      # `tauri::generate_context!` reads ../dist, which no frontend build has
+      # produced here. An empty index.html is all it asks for.
+      - run: mkdir -p dist && touch dist/index.html
+
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets

@@ -42,6 +42,7 @@ import type {
   UpdateMode,
   UserContext,
   UwuError,
+  WebrtcDiagnosis,
   VerificationRequestInfo,
 } from "./types";
 
@@ -517,3 +518,6 @@ export const latestRelease = () => invoke<LatestRelease>("latest_release");
 /** Is `latest` newer than the version this binary was built as? */
 export const updateAvailable = (latest: string) =>
   invoke<boolean>("update_available", { latest });
+
+/** What the native side knows about WebRTC here; `null` where it always works. */
+export const webrtcDiagnosis = () => invoke<WebrtcDiagnosis | null>("webrtc_diagnosis");
