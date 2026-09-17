@@ -26,9 +26,10 @@ WebView there is WebKitGTK, whose `ENABLE_WEB_RTC` follows
 back. Everything else works; joining a call says so rather than failing
 obscurely.
 
-A WebKitGTK built with WebRTC in it is the only thing that changes that, and
-building one is the whole of the workaround. On Arch, rebuild the distribution
-package with two flags added to `cmake_options`:
+A WebKitGTK built with WebRTC in it is the only thing that could change that,
+and **nobody has got one working yet** — the route below is where to start, not
+a recipe known to arrive. On Arch, rebuild the distribution package with two
+flags added to `cmake_options`:
 
 ```bash
 git clone https://gitlab.archlinux.org/archlinux/packaging/packages/webkit2gtk-4.1
@@ -43,11 +44,16 @@ already `ON` by default, and OpenSSL 3 and `gstreamer-webrtc-1.0` (from
 gst-plugins-bad) are the only other build-time requirements. Expect hours and
 tens of gigabytes, and an `IgnorePkg` entry so the next `-Syu` doesn't undo it.
 
-That build has to be the one the app actually loads, which the **AppImage is
-not** — linuxdeploy bundles a WebKitGTK and its `WebKitWebProcess` inside, so
+That build then has to be the one the app actually loads, which the **AppImage
+is not** — linuxdeploy bundles a WebKitGTK and its `WebKitWebProcess` inside, so
 the AppImage ignores whatever is installed on the system. Run a locally built
 uwum (`npm run app`, or `npm run app:build` on the patched machine) to get the
 system WebKitGTK.
+
+An attempt at exactly this on Arch with 2.52.6 did not end in a working call,
+and why is not yet established — so treat the flags as researched rather than
+proven, and check `typeof RTCPeerConnection` in the rebuilt WebKitGTK before
+blaming anything in this repository.
 
 Android needs an SDK, an NDK and a JDK. `npm run android` finds all three
 itself if they are installed; from nothing, that is:
