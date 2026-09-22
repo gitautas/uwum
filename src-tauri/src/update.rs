@@ -14,6 +14,7 @@
 //! the release workflow hasn't finished publishing.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 use crate::error::{Error, Result};
 
@@ -25,7 +26,8 @@ use crate::error::{Error, Result};
 /// platform's assets are attached — so this is never a half-published version.
 const MANIFEST: &str = "https://github.com/gitautas/uwum/releases/latest/download/latest.json";
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, TS)]
+#[ts(export, rename = "UpdateMode")]
 #[serde(rename_all = "kebab-case")]
 // Each platform's `update_mode` can only ever construct one of these, so on
 // any single target the other looks unreachable — but not across all of them.
@@ -39,7 +41,8 @@ pub enum Mode {
     Manual,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, TS)]
+#[ts(export)]
 pub struct LatestRelease {
     pub version: String,
     pub notes: String,

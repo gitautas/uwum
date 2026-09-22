@@ -7,13 +7,15 @@
 //! else, which is how the frontend knows the WebView isn't the suspect.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 /// What the native side can see about this WebView's WebRTC support.
 ///
 /// The frontend asks for this only after `RTCPeerConnection` has turned out to
 /// be missing, and turns it into a sentence that names the actual cause instead
 /// of livekit's "your browser doesn't support this".
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "WebrtcDiagnosis")]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnosis {
     /// `enable-webrtc` as WebKitGTK reported it back *after* we set it.

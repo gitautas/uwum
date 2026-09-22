@@ -4,6 +4,7 @@
 //! without parsing prose.
 
 use serde::Serialize;
+use ts_rs::TS;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -50,23 +51,50 @@ pub enum Error {
     Other(String),
 }
 
+/// A stable, machine-readable discriminant for the frontend.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorKind {
+    NotSignedIn,
+    Auth,
+    UnknownRoom,
+    NoTimeline,
+    Matrix,
+    BadId,
+    ClientBuild,
+    Timeline,
+    RoomList,
+    Io,
+    Json,
+    Http,
+    Other,
+}
+
+/// What an `Error` looks like once it reaches the frontend.
+#[derive(Serialize, TS)]
+#[ts(export)]
+pub struct UwuError {
+    kind: ErrorKind,
+    message: String,
+}
+
 impl Error {
-    /// A stable, machine-readable discriminant for the frontend.
-    fn kind(&self) -> &'static str {
+    fn kind(&self) -> ErrorKind {
         match self {
-            Self::NotSignedIn => "not_signed_in",
-            Self::Auth(_) => "auth",
-            Self::UnknownRoom(_) => "unknown_room",
-            Self::NoTimeline(_) => "no_timeline",
-            Self::Matrix(_) | Self::MatrixHttp(_) => "matrix",
-            Self::Id(_) => "bad_id",
-            Self::ClientBuild(_) => "client_build",
-            Self::Timeline(_) => "timeline",
-            Self::RoomList(_) => "room_list",
-            Self::Io(_) => "io",
-            Self::Json(_) => "json",
-            Self::Http(_) => "http",
-            Self::Other(_) => "other",
+            Self::NotSignedIn => ErrorKind::NotSignedIn,
+            Self::Auth(_) => ErrorKind::Auth,
+            Self::UnknownRoom(_) => ErrorKind::UnknownRoom,
+            Self::NoTimeline(_) => ErrorKind::NoTimeline,
+            Self::Matrix(_) | Self::MatrixHttp(_) => ErrorKind::Matrix,
+            Self::Id(_) => ErrorKind::BadId,
+            Self::ClientBuild(_) => ErrorKind::ClientBuild,
+            Self::Timeline(_) => ErrorKind::Timeline,
+            Self::RoomList(_) => ErrorKind::RoomList,
+            Self::Io(_) => ErrorKind::Io,
+            Self::Json(_) => ErrorKind::Json,
+            Self::Http(_) => ErrorKind::Http,
+            Self::Other(_) => ErrorKind::Other,
         }
     }
 }
@@ -85,11 +113,7 @@ impl From<url::ParseError> for Error {
 
 impl Serialize for Error {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let mut st = s.serialize_struct("Error", 2)?;
-        st.serialize_field("kind", self.kind())?;
-        st.serialize_field("message", &self.to_string())?;
-        st.end()
+        UwuError { kind: self.kind(), message: self.to_string() }.serialize(s)
     }
 }
 

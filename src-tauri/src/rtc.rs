@@ -26,6 +26,7 @@ use matrix_sdk::ruma::{
     },
 };
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::{
     error::{Error, Result},
@@ -37,7 +38,8 @@ use crate::{
 /// never blinks out of the participant list.
 const MEMBERSHIP_TTL: Duration = Duration::from_secs(4 * 60 * 60);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct CallCredentials {
     /// WebSocket URL of the SFU, e.g. `wss://livekit.example.org`.
@@ -49,7 +51,8 @@ pub struct CallCredentials {
     pub room_id: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct CallParticipants {
     pub room_id: String,
