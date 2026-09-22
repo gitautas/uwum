@@ -9,7 +9,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::task::JoinHandle;
 
 use crate::{
-    dto::{SyncStatus, TypingUpdate, TypingUser},
+    dto::{SyncState, SyncStatus, TypingUpdate, TypingUser},
     matrix::MatrixCore,
 };
 
@@ -44,18 +44,18 @@ pub fn spawn_sync_status_task(app: AppHandle, core: Arc<MatrixCore>) -> JoinHand
             let Some(state) = state else { break };
 
             use matrix_sdk_ui::sync_service::State;
-            let (name, message) = match &state {
-                State::Idle => ("idle", None),
-                State::Running => ("running", None),
-                State::Terminated => ("terminated", None),
-                State::Error { .. } => ("error", Some("sync stopped — retrying".to_owned())),
-                State::Offline => ("offline", Some("offline".to_owned())),
+            let (sync_state, message) = match &state {
+                State::Idle => (SyncState::Idle, None),
+                State::Running => (SyncState::Running, None),
+                State::Terminated => (SyncState::Terminated, None),
+                State::Error { .. } => (SyncState::Error, Some("sync stopped — retrying".to_owned())),
+                State::Offline => (SyncState::Offline, Some("offline".to_owned())),
             };
 
             emit(
                 &app,
                 EV_SYNC_STATUS,
-                SyncStatus { state: name.to_owned(), message },
+                SyncStatus { state: sync_state, message },
             );
         }
     })

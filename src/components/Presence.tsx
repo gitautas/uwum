@@ -12,15 +12,18 @@ import { useEffect, useState, type CSSProperties } from "react";
 
 import { formatLastSeen } from "../lib/display";
 import { usePresence, usePresenceSupported } from "../lib/presence";
-import type { Presence, PresenceState } from "../lib/types";
+import type { Availability, Presence } from "../lib/types";
 
-const COLOUR: Record<Exclude<PresenceState, "unknown">, string> = {
+/** What gets a dot. `unknown` is a server answer we can't read, and gets none. */
+type Drawable = Exclude<Availability, "unknown">;
+
+const COLOUR: Record<Drawable, string> = {
   online: "var(--status-online)",
   unavailable: "var(--status-idle)",
   offline: "var(--status-offline)",
 };
 
-const WORD: Record<Exclude<PresenceState, "unknown">, string> = {
+const WORD: Record<Drawable, string> = {
   online: "online",
   unavailable: "away",
   offline: "offline",
@@ -30,7 +33,7 @@ const WORD: Record<Exclude<PresenceState, "unknown">, string> = {
 function drawable(
   presence: Presence | undefined,
   supported: boolean,
-): Exclude<PresenceState, "unknown"> | undefined {
+): Drawable | undefined {
   if (!supported || !presence) return undefined;
   return presence.presence === "unknown" ? undefined : presence.presence;
 }

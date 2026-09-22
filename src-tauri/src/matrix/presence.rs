@@ -33,6 +33,7 @@ use tokio::{
     sync::{Mutex, Notify},
     task::JoinHandle,
 };
+use ts_rs::TS;
 
 use crate::{
     error::Result,
@@ -62,12 +63,12 @@ const UNSUPPORTED_RETRY: Duration = Duration::from_secs(15 * 60);
 const CONCURRENCY: usize = 8;
 
 /// One person's presence, as the UI draws it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[ts(export, rename = "Presence")]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceDto {
     pub user_id: String,
-    /// `online` | `unavailable` | `offline`.
-    pub presence: String,
+    pub presence: Availability,
     /// The free-text status the *presence* system carries. Distinct from the
     /// MSC4133 profile status in `profile.rs`, which is the one people set by
     /// hand and the one the profile card shows.
@@ -82,8 +83,32 @@ pub struct PresenceDto {
     pub currently_active: bool,
 }
 
+/// The spec's three presence states, and a fourth for anything else a server
+/// sends — which the UI draws as nothing rather than guessing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum Availability {
+    Online,
+    Unavailable,
+    Offline,
+    Unknown,
+}
+
+impl From<&PresenceState> for Availability {
+    fn from(state: &PresenceState) -> Self {
+        match state {
+            PresenceState::Online => Self::Online,
+            PresenceState::Unavailable => Self::Unavailable,
+            PresenceState::Offline => Self::Offline,
+            _ => Self::Unknown,
+        }
+    }
+}
+
 /// A batch of changes, plus whether presence works here at all.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceUpdate {
     pub users: Vec<PresenceDto>,
@@ -93,7 +118,8 @@ pub struct PresenceUpdate {
 }
 
 /// What the frontend can ask us to publish about the user.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "lowercase")]
 pub enum OwnPresence {
     Online,
@@ -316,7 +342,7 @@ async fn fetch_one(core: &MatrixCore, user_id: OwnedUserId) -> Option<PresenceDt
 
     Some(PresenceDto {
         user_id: user_id.to_string(),
-        presence: response.presence.as_str().to_owned(),
+        presence: (&response.presence).into(),
         status_msg: response.status_msg.filter(|s| !s.is_empty()),
         last_active,
         currently_active: response.currently_active.unwrap_or(false),

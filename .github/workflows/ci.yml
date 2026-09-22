@@ -65,3 +65,16 @@ jobs:
       - run: mkdir -p dist && touch dist/index.html
 
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets
+
+      # src/lib/bindings is generated from the Rust wire types and committed, so
+      # the frontend build never needs cargo. That only holds while nobody
+      # forgets `npm run bindings` after changing one; regenerate here and fail
+      # on any difference, including a file that should no longer exist.
+      - name: Check TypeScript bindings are current
+        run: |
+          node scripts/bindings.mjs
+          if [ -n "$(git status --porcelain -- src/lib/bindings)" ]; then
+            git status --short -- src/lib/bindings
+            echo "::error::src/lib/bindings is out of date — run \`npm run bindings\` and commit the result"
+            exit 1
+          fi

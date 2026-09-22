@@ -19,8 +19,10 @@ use std::time::Duration;
 use matrix_sdk::ruma::UserId;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use ts_rs::TS;
 
 use crate::{
+    dto::Verification,
     error::{Error, Result},
     matrix::MatrixCore,
 };
@@ -29,26 +31,34 @@ const BIO_KEY: &str = "chat.commet.profile_bio";
 const STATUS_KEY: &str = "chat.commet.profile_status";
 const COVER_KEY: &str = "gg.uwu.cover_url";
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "Profile")]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
     pub user_id: String,
     pub display_name: Option<String>,
     pub avatar_url: Option<String>,
+    /// Commet's `chat.commet.profile_bio`, unwrapped from its `body` object.
     pub bio: Option<String>,
+    /// Commet's `chat.commet.profile_status`.
     pub status: Option<String>,
+    /// `gg.uwu.cover_url` — ours; no other client reads it.
     pub cover_url: Option<String>,
 }
 
 /// A partial update. `None` leaves a field alone; `Some("")` clears it.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileUpdate {
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub bio: Option<String>,
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub status: Option<String>,
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub cover_url: Option<String>,
 }
 
@@ -162,7 +172,8 @@ async fn set_field(core: &MatrixCore, key: &str, value: Value, clear: bool) -> R
 // ---------------------------------------------------------------------------
 
 /// A room both of you are in, reduced to what a profile card draws.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "SharedRoom")]
 #[serde(rename_all = "camelCase")]
 pub struct SharedRoomDto {
     pub id: String,
@@ -175,13 +186,13 @@ pub struct SharedRoomDto {
 /// The parts of a profile card that come from our own client rather than from
 /// the profile endpoint: whether we've verified them, whether there's already a
 /// DM, and where the two of you overlap.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "UserContext")]
 #[serde(rename_all = "camelCase")]
 pub struct UserContextDto {
     pub user_id: String,
     pub is_me: bool,
-    /// "verified" | "unverified" | "unknown" — same values as a member row.
-    pub verification: String,
+    pub verification: Verification,
     pub dm_room_id: Option<String>,
     pub shared_rooms: Vec<SharedRoomDto>,
 }
@@ -191,9 +202,9 @@ pub async fn get_user_context(core: &MatrixCore, user_id: String) -> Result<User
     let me = core.own_user_id()?;
 
     let verification = match core.client.encryption().get_user_identity(&user_id).await {
-        Ok(Some(identity)) if identity.is_verified() => "verified",
-        Ok(Some(_)) => "unverified",
-        _ => "unknown",
+        Ok(Some(identity)) if identity.is_verified() => Verification::Verified,
+        Ok(Some(_)) => Verification::Unverified,
+        _ => Verification::Unknown,
     };
 
     let shared = if user_id == me {
@@ -206,7 +217,7 @@ pub async fn get_user_context(core: &MatrixCore, user_id: String) -> Result<User
         is_me: user_id == me,
         dm_room_id: core.client.get_dm_room(&user_id).map(|r| r.room_id().to_string()),
         shared_rooms: shared,
-        verification: verification.to_owned(),
+        verification,
         user_id: user_id.to_string(),
     })
 }

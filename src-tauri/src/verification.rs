@@ -26,6 +26,7 @@ use matrix_sdk::{
 use matrix_sdk_ui::timeline::EncryptedMessage;
 use serde::Serialize;
 use tauri::AppHandle;
+use ts_rs::TS;
 
 use crate::{
     error::{Error, Result},
@@ -38,7 +39,8 @@ use crate::{
 /// client to pick a flow that dead-ends here.
 const SAS_ONLY: &[VerificationMethod] = &[VerificationMethod::SasV1];
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "VerificationRequestInfo")]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationRequestDto {
     pub flow_id: String,
@@ -46,8 +48,7 @@ pub struct VerificationRequestDto {
     pub other_device_id: Option<String>,
     pub is_self_verification: bool,
     pub we_started: bool,
-    /// `requested` | `ready` | `transitioned` | `done` | `cancelled`
-    pub state: String,
+    pub state: RequestState,
     /// Why the flow ended, when it ended badly and before SAS ever started —
     /// otherwise there is nothing to show the user but "it stopped".
     pub cancel_reason: Option<String>,
@@ -62,13 +63,13 @@ pub struct VerificationRequestDto {
     pub cancel_code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, rename = "SasStateInfo")]
 #[serde(rename_all = "camelCase")]
 pub struct SasStateDto {
     pub flow_id: String,
     pub other_user_id: String,
-    /// `created` | `started` | `accepted` | `keysExchanged` | `confirmed` | `done` | `cancelled`
-    pub state: String,
+    pub state: SasStage,
     /// The seven SAS emoji, once both sides have exchanged keys.
     pub emoji: Option<Vec<SasEmoji>>,
     pub decimals: Option<[u16; 3]>,
@@ -77,21 +78,48 @@ pub struct SasStateDto {
     pub cancel_code: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct SasEmoji {
     pub symbol: String,
     pub description: String,
 }
 
-fn request_state_name(state: &VerificationRequestState) -> &'static str {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum RequestState {
+    Created,
+    Requested,
+    Ready,
+    Transitioned,
+    Done,
+    Cancelled,
+}
+
+/// `SasState`, without the payloads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum SasStage {
+    Created,
+    Started,
+    Accepted,
+    KeysExchanged,
+    Confirmed,
+    Done,
+    Cancelled,
+}
+
+fn request_state(state: &VerificationRequestState) -> RequestState {
     match state {
-        VerificationRequestState::Created { .. } => "created",
-        VerificationRequestState::Requested { .. } => "requested",
-        VerificationRequestState::Ready { .. } => "ready",
-        VerificationRequestState::Transitioned { .. } => "transitioned",
-        VerificationRequestState::Done => "done",
-        VerificationRequestState::Cancelled(_) => "cancelled",
+        VerificationRequestState::Created { .. } => RequestState::Created,
+        VerificationRequestState::Requested { .. } => RequestState::Requested,
+        VerificationRequestState::Ready { .. } => RequestState::Ready,
+        VerificationRequestState::Transitioned { .. } => RequestState::Transitioned,
+        VerificationRequestState::Done => RequestState::Done,
+        VerificationRequestState::Cancelled(_) => RequestState::Cancelled,
     }
 }
 
@@ -111,7 +139,7 @@ fn to_dto(request: &VerificationRequest, state: &VerificationRequestState) -> Ve
         other_device_id: None,
         is_self_verification: request.is_self_verification(),
         we_started: request.we_started(),
-        state: request_state_name(state).to_owned(),
+        state: request_state(state),
         cancel_reason: cancel.map(|c| c.reason().to_owned()),
         cancelled_by_us: cancel.map(CancelInfo::cancelled_by_us),
         cancel_code: cancel.map(|c| c.cancel_code().as_str().to_owned()),
@@ -282,14 +310,14 @@ async fn undecryptable_sessions(timeline: &matrix_sdk_ui::Timeline) -> BTreeSet<
 }
 
 fn sas_dto(sas: &SasVerification, flow_id: &str, state: &SasState) -> SasStateDto {
-    let name = match state {
-        SasState::Created { .. } => "created",
-        SasState::Started { .. } => "started",
-        SasState::Accepted { .. } => "accepted",
-        SasState::KeysExchanged { .. } => "keysExchanged",
-        SasState::Confirmed => "confirmed",
-        SasState::Done { .. } => "done",
-        SasState::Cancelled(_) => "cancelled",
+    let stage = match state {
+        SasState::Created { .. } => SasStage::Created,
+        SasState::Started { .. } => SasStage::Started,
+        SasState::Accepted { .. } => SasStage::Accepted,
+        SasState::KeysExchanged { .. } => SasStage::KeysExchanged,
+        SasState::Confirmed => SasStage::Confirmed,
+        SasState::Done { .. } => SasStage::Done,
+        SasState::Cancelled(_) => SasStage::Cancelled,
     };
 
     let emoji = sas.emoji().map(|list| {
@@ -306,7 +334,7 @@ fn sas_dto(sas: &SasVerification, flow_id: &str, state: &SasState) -> SasStateDt
     SasStateDto {
         flow_id: flow_id.to_owned(),
         other_user_id: sas.other_user_id().to_string(),
-        state: name.to_owned(),
+        state: stage,
         emoji,
         decimals: sas.decimals().map(|(a, b, c)| [a, b, c]),
         cancel_reason: cancel.as_ref().map(|c| c.reason().to_owned()),
@@ -474,7 +502,8 @@ pub async fn cancel(core: &MatrixCore, user_id: &str, flow_id: &str) -> Result<(
 // this account's devices
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviceInfo {
     pub device_id: String,
@@ -553,24 +582,35 @@ pub async fn verify_device(app: &AppHandle, core: &Arc<MatrixCore>, device_id: &
 // recovery / key backup
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryStatus {
-    /// `enabled` | `disabled` | `incomplete` | `unknown`
-    pub state: String,
+    pub state: RecoveryState,
     pub backup_exists: bool,
     pub cross_signing_ready: bool,
 }
 
+/// The SDK's `RecoveryState`, which isn't `Serialize`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub enum RecoveryState {
+    Enabled,
+    Disabled,
+    Incomplete,
+    Unknown,
+}
+
 pub async fn recovery_status(core: &MatrixCore) -> Result<RecoveryStatus> {
-    use matrix_sdk::encryption::recovery::RecoveryState;
+    use matrix_sdk::encryption::recovery::RecoveryState as Sdk;
 
     let encryption = core.client.encryption();
     let state = match encryption.recovery().state() {
-        RecoveryState::Enabled => "enabled",
-        RecoveryState::Disabled => "disabled",
-        RecoveryState::Incomplete => "incomplete",
-        RecoveryState::Unknown => "unknown",
+        Sdk::Enabled => RecoveryState::Enabled,
+        Sdk::Disabled => RecoveryState::Disabled,
+        Sdk::Incomplete => RecoveryState::Incomplete,
+        Sdk::Unknown => RecoveryState::Unknown,
     };
 
     let cross_signing_ready = encryption
@@ -579,7 +619,7 @@ pub async fn recovery_status(core: &MatrixCore) -> Result<RecoveryStatus> {
         .is_some_and(|status| status.is_complete());
 
     Ok(RecoveryStatus {
-        state: state.to_owned(),
+        state,
         backup_exists: encryption.backups().exists_on_server().await.unwrap_or(false),
         cross_signing_ready,
     })

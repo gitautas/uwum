@@ -6,7 +6,7 @@ Rust owns the protocol; the WebView owns the pixels and the media.
 src-tauri/src/
   lib.rs          tauri builder, command registry, uwum:// media protocol
   commands.rs     the whole IPC surface — thin wrappers, no logic
-  dto.rs          the wire format (camelCase); mirrored by src/lib/types.ts
+  dto.rs          the wire format (camelCase); src/lib/bindings is generated from it
   error.rs        one error type, serialised as { kind, message }
   events.rs       events pushed to the frontend + the tasks producing them
   matrix/
@@ -23,7 +23,8 @@ src-tauri/src/
 
 src/
   lib/ipc.ts      typed wrappers over every command and event
-  lib/types.ts    mirror of dto.rs
+  lib/bindings/   the wire types as TypeScript, generated — `npm run bindings`
+  lib/types.ts    re-exports them, plus the helpers that read them
   lib/diff.ts     applies VectorDiffs from the backend
   lib/richText.ts renders other people's HTML without trusting it
   lib/blobMedia.ts video/audio over IPC, because a custom scheme can't serve it
@@ -292,6 +293,27 @@ LAN as the server, check NAT hairpinning before anything else.
 which homeserver, which store directory). The access token and the SQLite
 passphrase go to the OS keychain. If no keychain is available the app falls back
 to a `0600` file **and says so in the UI** — the weaker storage is never silent.
+
+## Wire types
+
+Every type that crosses the bridge derives `ts_rs::TS` in Rust, and
+`npm run bindings` writes it out to `src/lib/bindings`. Nothing on the
+TypeScript side is written by hand, so the two cannot drift: change a Rust type,
+regenerate, and `tsc` points at every use that no longer fits. CI regenerates
+too, and fails if the committed files differ.
+
+ts-rs reads the serde attributes, so what it writes is what serde actually
+sends. Two things it can't see:
+
+- A value the frontend branches on should be a Rust enum, not a `String`. A
+  string comes out as `string`, and a typo in a comparison then compiles.
+- A field the backend accepts being left out — `#[serde(default)]` on an input
+  type — also needs `#[ts(optional)]`, or the generated type demands it.
+
+`.cargo/config.toml` sits at the repo root, not in `src-tauri/`, because cargo
+looks for it from the directory it runs in. It is what keeps a `u64` a `number`
+rather than a `bigint`, so regenerate through `npm run bindings`, which runs
+cargo from the right place, rather than from somewhere outside the repo.
 
 ## Tests
 
