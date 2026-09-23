@@ -126,11 +126,6 @@ export const inviteUser = (roomId: string, userId: string) =>
 export const setTyping = (roomId: string, typing: boolean) =>
   invoke<void>("set_typing", { roomId, typing });
 
-export const setRoomFavourite = (roomId: string, favourite: boolean) =>
-  invoke<void>("set_room_favourite", { roomId, favourite });
-
-export const setRoomLowPriority = (roomId: string, lowPriority: boolean) =>
-  invoke<void>("set_room_low_priority", { roomId, lowPriority });
 
 export const setRoomMuted = (roomId: string, muted: boolean) =>
   invoke<void>("set_room_muted", { roomId, muted });

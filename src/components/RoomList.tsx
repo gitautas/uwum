@@ -437,10 +437,6 @@ function RoomRow({
           >
             {room.name}
           </span>
-          {/* Explains why this room is sitting at the top of its group. */}
-          {room.isFavourite && (
-            <Icon name="star" size={11} color="var(--accent-secondary)" />
-          )}
           {room.isEncrypted && (
             <Icon name="shield-check" size={12} color="var(--accent-primary)" />
           )}

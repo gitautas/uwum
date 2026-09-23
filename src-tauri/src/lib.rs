@@ -61,8 +61,6 @@ pub fn run() {
             commands::get_room_permissions,
             commands::invite_user,
             commands::set_typing,
-            commands::set_room_favourite,
-            commands::set_room_low_priority,
             commands::set_room_muted,
             commands::set_room_marked_unread,
             // image packs

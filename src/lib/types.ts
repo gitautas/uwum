@@ -76,8 +76,6 @@ export interface RoomSummary {
   isSpace: boolean;
   /** A room that holds data rather than a conversation — an image pack, say. */
   isUtility: boolean;
-  isFavourite: boolean;
-  isLowPriority: boolean;
   isMuted: boolean;
   membership: "joined" | "invited" | "left" | "knocked" | "banned";
   notificationCount: number;
