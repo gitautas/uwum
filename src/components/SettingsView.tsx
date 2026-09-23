@@ -26,6 +26,7 @@ import {
 } from "../lib/sounds";
 import type { DeviceInfo, Profile, RecoveryStatus } from "../lib/types";
 import { useStore } from "../store";
+import { MicSettings } from "./MicSettings";
 import { PacksSection } from "./PackSettings";
 import { Card, Field, Heading, inputStyle, Row } from "./settingsUi";
 import { Avatar, Button, dragRegion, Icon, RaveLabel, Spinner, Toggle } from "./ui";
@@ -869,6 +870,11 @@ function VoiceSection() {
             )}
           </>
         )}
+      </Card>
+
+      <Heading>microphone</Heading>
+      <Card>
+        <MicSettings />
       </Card>
 
       <Heading>call server</Heading>
