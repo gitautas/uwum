@@ -186,8 +186,6 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         is_encrypted: room.encryption_state().is_encrypted(),
         is_space: room.is_space(),
         is_utility: is_utility_room_type(room_type),
-        is_favourite: room.is_favourite(),
-        is_low_priority: room.is_low_priority(),
         is_muted: muted,
         membership: membership(room.state()),
         notification_count,
@@ -278,9 +276,7 @@ pub fn spawn_room_list_task(app: AppHandle, core: Arc<MatrixCore>) -> JoinHandle
 ///
 /// The sidebar's stream only emits a diff when the SDK marks a room's info
 /// notable, and notification settings aren't room state — they're global push
-/// rules — so nothing about muting reaches the UI on its own. Favourite and low
-/// priority are room account data, which is why those toggles look like they
-/// work and the mute one doesn't.
+/// rules — so nothing about muting reaches the UI on its own.
 ///
 /// Folding into the mirror under the same lock the stream uses keeps `seq`
 /// meaning what it claims to: batch N is the Nth change to the list.
@@ -348,8 +344,6 @@ async fn summarise_or_placeholder(room: &Room) -> RoomSummary {
                 is_encrypted: false,
                 is_space: false,
                 is_utility: false,
-                is_favourite: false,
-                is_low_priority: false,
                 is_muted: false,
                 membership: membership(room.state()),
                 notification_count: 0,
@@ -763,16 +757,6 @@ pub async fn leave(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
 
 pub async fn set_typing(core: &MatrixCore, room_id: &RoomId, typing: bool) -> Result<()> {
     core.room(&room_id.to_owned())?.typing_notice(typing).await?;
-    Ok(())
-}
-
-pub async fn set_favourite(core: &MatrixCore, room_id: &RoomId, favourite: bool) -> Result<()> {
-    core.room(&room_id.to_owned())?.set_is_favourite(favourite, None).await?;
-    Ok(())
-}
-
-pub async fn set_low_priority(core: &MatrixCore, room_id: &RoomId, low: bool) -> Result<()> {
-    core.room(&room_id.to_owned())?.set_is_low_priority(low, None).await?;
     Ok(())
 }
 

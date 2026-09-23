@@ -605,11 +605,7 @@ export function filterRooms(
 
   // Sort here rather than trusting the arrival order of diffs: a snapshot and a
   // stream of updates shouldn't produce a different-looking list.
-  //
-  // Favourites sort first so they pin to the top of whichever group they land
-  // in — they're a priority marker, not a separate section to go hunting in.
   return visible.sort((a, b) => {
-    if (a.isFavourite !== b.isFavourite) return a.isFavourite ? -1 : 1;
     const at = a.latest?.timestamp ?? a.recency;
     const bt = b.latest?.timestamp ?? b.recency;
     return bt - at || a.name.localeCompare(b.name);
@@ -623,8 +619,7 @@ export interface RoomGroup {
 
 /**
  * Invites first (they're a question waiting on you), then people, then rooms.
- * Within each group the order comes from `filterRooms`, so favourites are
- * already on top.
+ * Within each group the order comes from `filterRooms`.
  */
 export function groupRooms(rooms: RoomSummary[]): RoomGroup[] {
   const invites = rooms.filter((r) => r.membership === "invited");

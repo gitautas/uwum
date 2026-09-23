@@ -80,7 +80,9 @@ describe("the read receipt facepile", () => {
       return img!;
     });
     expect(avatar.getAttribute("src")).toBe("mxc://veil.gg/fa");
-    expect(screen.getByText("seen by 1")).toBeTruthy();
+    // Faces only: the count is a label, not text on screen.
+    expect(screen.getByRole("group", { name: "seen by 1" })).toBeTruthy();
+    expect(screen.queryByText(/seen by/)).toBeNull();
   });
 
   it("uses the picture already on screen rather than asking again", async () => {

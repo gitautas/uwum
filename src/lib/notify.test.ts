@@ -58,8 +58,6 @@ function room(patch: Partial<RoomSummary> & { id: string }): RoomSummary {
     isEncrypted: true,
     isSpace: false,
     isUtility: false,
-    isFavourite: false,
-    isLowPriority: false,
     isMuted: false,
     membership: "joined",
     notificationCount: 0,

@@ -80,8 +80,6 @@ pub struct RoomSummary {
     /// A room that isn't a conversation — a pack room, or anything else with a
     /// room type we don't draw. Spaces have their own flag and their own rail.
     pub is_utility: bool,
-    pub is_favourite: bool,
-    pub is_low_priority: bool,
     pub is_muted: bool,
     pub membership: RoomMembership,
     pub notification_count: u64,

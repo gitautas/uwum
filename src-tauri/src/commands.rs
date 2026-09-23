@@ -173,24 +173,6 @@ pub async fn set_typing(
 }
 
 #[tauri::command]
-pub async fn set_room_favourite(
-    state: State<'_, AppState>,
-    room_id: String,
-    favourite: bool,
-) -> Result<()> {
-    rooms::set_favourite(&*state.core().await?, &parse_room_id(&room_id)?, favourite).await
-}
-
-#[tauri::command]
-pub async fn set_room_low_priority(
-    state: State<'_, AppState>,
-    room_id: String,
-    low_priority: bool,
-) -> Result<()> {
-    rooms::set_low_priority(&*state.core().await?, &parse_room_id(&room_id)?, low_priority).await
-}
-
-#[tauri::command]
 pub async fn set_room_muted(
     app: AppHandle,
     state: State<'_, AppState>,

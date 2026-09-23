@@ -421,8 +421,15 @@ export function ReadReceipts({ items }: { items: TimelineItem[] }) {
 
   if (receipts.length === 0) return null;
 
+  const overflow = receipts.length - MAX_FACES;
+
+  // Just the faces. The count lives on the label for screen readers and the
+  // hover tooltip, and only shows up on screen once the pile runs out of room.
   return (
     <div
+      role="group"
+      aria-label={`seen by ${receipts.length}`}
+      title={`seen by ${receipts.length}`}
       style={{
         display: "flex",
         alignItems: "center",
@@ -433,16 +440,17 @@ export function ReadReceipts({ items }: { items: TimelineItem[] }) {
       {receipts.slice(0, MAX_FACES).map((userId) => (
         <ReceiptFace key={userId} userId={userId} known={seen.get(userId)} />
       ))}
-      <span
-        style={{
-          marginLeft: 6,
-          fontFamily: "var(--font-mono)",
-          fontSize: 10.5,
-          color: "var(--text-tertiary)",
-        }}
-      >
-        seen by {receipts.length}
-      </span>
+      {overflow > 0 && (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10.5,
+            color: "var(--text-tertiary)",
+          }}
+        >
+          +{overflow}
+        </span>
+      )}
     </div>
   );
 }

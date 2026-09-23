@@ -9,7 +9,7 @@ import { PresenceDot } from "./Presence";
 import { AvatarButton, useProfileAnchor } from "./ProfileCard";
 import { ProfileHeader } from "./ProfileHeader";
 import { RoomSettingsDialog } from "./RoomSettings";
-import { Avatar, Icon, IconToggle, RaveLabel, Spinner } from "./ui";
+import { Avatar, Icon, RaveLabel, Spinner } from "./ui";
 
 /** Matches the panel below, so a full-bleed cover is asked for at its width. */
 const PANEL_WIDTH = 296;
@@ -52,10 +52,12 @@ export function RoomInfo({ room, onBack }: { room: RoomSummary; onBack?: () => v
   const joined = members ?? [];
   const unverified = joined.filter((m) => m.verification !== "verified").length;
 
-  // The room toggles were all swallowing their errors, so one that failed
-  // server-side looked exactly like a button that did nothing.
-  const toggle = (request: Promise<void>) =>
-    request.catch((e) => showBanner("error", ipc.asUwuError(e).message));
+  // The mute toggle used to swallow its errors, so one that failed server-side
+  // looked exactly like a button that did nothing.
+  const toggleMuted = () =>
+    void ipc
+      .setRoomMuted(room.id, !room.isMuted)
+      .catch((e) => showBanner("error", ipc.asUwuError(e).message));
 
   // A DM is a person, so the top of the panel should be them rather than a
   // room avatar and a room ID. Not every direct room has exactly one other
@@ -103,33 +105,30 @@ export function RoomInfo({ room, onBack }: { room: RoomSummary; onBack?: () => v
         </button>
       )}
 
-      <button
-        onClick={() => setSettingsOpen(true)}
-        title="room settings"
-        aria-label="room settings"
+      {/* Tucked into the corner: things you set once and then forget about. */}
+      <div
         style={{
           position: "absolute",
           top: onBack ? "calc(var(--safe-top) + 14px)" : 14,
           right: 14,
-          width: 28,
-          height: 28,
-          borderRadius: 999,
           display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          background: "var(--surface-card)",
-          border: "1px solid var(--border-subtle)",
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = "var(--surface-card-raised)";
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = "var(--surface-card)";
+          gap: 6,
+          zIndex: 2,
         }}
       >
-        <Icon name="pencil-simple" size={13} color="var(--text-secondary)" />
-      </button>
+        <CornerButton
+          icon={room.isMuted ? "bell-slash" : "bell"}
+          label={room.isMuted ? "unmute notifications" : "mute notifications"}
+          colour={room.isMuted ? "var(--status-warning)" : undefined}
+          pressed={room.isMuted}
+          onClick={toggleMuted}
+        />
+        <CornerButton
+          icon="pencil-simple"
+          label="room settings"
+          onClick={() => setSettingsOpen(true)}
+        />
+      </div>
 
       {partner ? (
         <DmHeader partner={partner} />
@@ -207,34 +206,54 @@ export function RoomInfo({ room, onBack }: { room: RoomSummary; onBack?: () => v
         <MemberRow key={member.userId} member={member} />
       ))}
 
-      <RaveLabel style={{ padding: "18px 4px 8px" }}>room</RaveLabel>
-      <div style={{ display: "flex", gap: 8 }}>
-        <IconToggle
-          icon="bell-slash"
-          label="mute notifications"
-          on={room.isMuted}
-          colour="var(--status-warning)"
-          onToggle={(next) => void toggle(ipc.setRoomMuted(room.id, next))}
-        />
-        <IconToggle
-          icon="star"
-          label="favourite"
-          on={room.isFavourite}
-          colour="var(--accent-secondary)"
-          onToggle={(next) => void toggle(ipc.setRoomFavourite(room.id, next))}
-        />
-        <IconToggle
-          icon="arrow-down"
-          label="low priority"
-          on={room.isLowPriority}
-          onToggle={(next) => void toggle(ipc.setRoomLowPriority(room.id, next))}
-        />
-      </div>
-
       {settingsOpen && (
         <RoomSettingsDialog room={room} onClose={() => setSettingsOpen(false)} />
       )}
     </div>
+  );
+}
+
+/** A small round button for the panel's top-right corner. */
+function CornerButton({
+  icon,
+  label,
+  colour,
+  pressed,
+  onClick,
+}: {
+  icon: string;
+  label: string;
+  colour?: string;
+  /** Set for toggles, so screen readers hear the state and not just the name. */
+  pressed?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={pressed}
+      style={{
+        width: 28,
+        height: 28,
+        borderRadius: 999,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: "pointer",
+        background: "var(--surface-card)",
+        border: `1px solid ${colour ?? "var(--border-subtle)"}`,
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = "var(--surface-card-raised)";
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = "var(--surface-card)";
+      }}
+    >
+      <Icon name={icon} size={13} color={colour ?? "var(--text-secondary)"} />
+    </button>
   );
 }
 
