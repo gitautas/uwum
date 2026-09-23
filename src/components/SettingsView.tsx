@@ -15,6 +15,7 @@ import {
   listMediaDevices,
   type Accent,
   type AudioDevice,
+  type MediaDevices,
 } from "../lib/settings";
 import {
   CALL_SOUNDS,
@@ -26,6 +27,7 @@ import {
 } from "../lib/sounds";
 import type { DeviceInfo, Profile, RecoveryStatus } from "../lib/types";
 import { useStore } from "../store";
+import { CameraBackdrop } from "./CameraBackdrop";
 import { MicSettings } from "./MicSettings";
 import { PacksSection } from "./PackSettings";
 import { Card, Field, Heading, inputStyle, Row } from "./settingsUi";
@@ -766,16 +768,22 @@ function SecuritySection() {
 // voice
 // ---------------------------------------------------------------------------
 
+/**
+ * What a device picker shows: the saved device if it's still plugged in,
+ * otherwise whichever one the system default is right now. There's no
+ * "system default" entry; leaving the picker alone is how you get that.
+ */
+function shownDevice(saved: string, available: AudioDevice[], systemDefault: string | null) {
+  if (saved && available.some((d) => d.deviceId === saved)) return saved;
+  return systemDefault ?? available[0]?.deviceId ?? "";
+}
+
 function VoiceSection() {
   const { settings, updateSettings } = useStore(
     useShallow((s) => ({ settings: s.settings, updateSettings: s.updateSettings })),
   );
 
-  const [devices, setDevices] = useState<{
-    inputs: AudioDevice[];
-    outputs: AudioDevice[];
-    cameras: AudioDevice[];
-  } | null>(null);
+  const [devices, setDevices] = useState<MediaDevices | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -784,55 +792,46 @@ function VoiceSection() {
         if (!cancelled) setDevices(found);
       })
       .catch(() => {
-        if (!cancelled) setDevices({ inputs: [], outputs: [], cameras: [] });
+        if (!cancelled) setDevices({
+            inputs: [],
+            outputs: [],
+            cameras: [],
+            defaults: { input: null, output: null, camera: null },
+          });
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
+  const spinner = (
+    <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+      <Spinner />
+    </div>
+  );
+  const missing = (what: string) => (
+    <div style={{ fontSize: 12.5, color: "var(--status-warning)" }}>
+      no {what} found — check that uwum has permission in system settings.
+    </div>
+  );
+
   return (
     <>
-      <Heading>voice & video</Heading>
-
+      <Heading>audio</Heading>
       <Card>
         {!devices ? (
-          <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
-            <Spinner />
-          </div>
+          spinner
         ) : (
           <>
-            <Field
-              label="input device"
-              hint="the microphone other people hear. changing this mid-call switches it live."
-            >
-              <select
-                value={settings.audioInput}
-                onChange={(e) => {
-                  updateSettings({ audioInput: e.target.value });
-                  void call.setAudioInput(e.target.value);
-                }}
-                style={inputStyle}
-              >
-                <option value="">system default</option>
-                {devices.inputs.map((device) => (
-                  <option key={device.deviceId} value={device.deviceId}>
-                    {device.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
             <Field label="output device" hint="where you hear everyone else.">
               <select
-                value={settings.audioOutput}
+                value={shownDevice(settings.audioOutput, devices.outputs, devices.defaults.output)}
                 onChange={(e) => {
                   updateSettings({ audioOutput: e.target.value });
                   void call.setAudioOutput(e.target.value);
                 }}
                 style={inputStyle}
               >
-                <option value="">system default</option>
                 {devices.outputs.map((device) => (
                   <option key={device.deviceId} value={device.deviceId}>
                     {device.label}
@@ -842,18 +841,67 @@ function VoiceSection() {
             </Field>
 
             <Field
+              label="input device"
+              hint="the microphone other people hear. changing this mid-call switches it live."
+            >
+              <select
+                value={shownDevice(settings.audioInput, devices.inputs, devices.defaults.input)}
+                onChange={(e) => {
+                  updateSettings({ audioInput: e.target.value });
+                  void call.setAudioInput(e.target.value);
+                }}
+                style={inputStyle}
+              >
+                {devices.inputs.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>
+                    {device.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <MicSettings />
+
+            {devices.inputs.length === 0 && missing("microphones")}
+          </>
+        )}
+      </Card>
+
+      <Heading>video</Heading>
+      <Card
+        backdrop={
+          devices && devices.cameras.length > 0 ? (
+            <CameraBackdrop deviceId={settings.videoInput} />
+          ) : undefined
+        }
+      >
+        {!devices ? (
+          spinner
+        ) : (
+          <div
+            style={{
+              // Room for the picture: the camera field sits along the bottom
+              // like a video tile's controls, with your face above it.
+              ...(devices.cameras.length > 0 && {
+                minHeight: 220,
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "flex-end",
+              }),
+            }}
+          >
+            <Field
               label="camera"
               hint="used when you turn video on in a call. changing this mid-call switches it live."
             >
               <select
-                value={settings.videoInput}
+                value={shownDevice(settings.videoInput, devices.cameras, devices.defaults.camera)}
                 onChange={(e) => {
                   updateSettings({ videoInput: e.target.value });
                   void call.setVideoInput(e.target.value);
                 }}
                 style={inputStyle}
               >
-                <option value="">system default</option>
                 {devices.cameras.map((device) => (
                   <option key={device.deviceId} value={device.deviceId}>
                     {device.label}
@@ -862,36 +910,9 @@ function VoiceSection() {
               </select>
             </Field>
 
-            {(devices.inputs.length === 0 || devices.cameras.length === 0) && (
-              <div style={{ fontSize: 12.5, color: "var(--status-warning)" }}>
-                no {devices.inputs.length === 0 ? "microphones" : "cameras"} found —
-                check that uwum has permission in system settings.
-              </div>
-            )}
-          </>
+            {devices.cameras.length === 0 && missing("cameras")}
+          </div>
         )}
-      </Card>
-
-      <Heading>microphone</Heading>
-      <Card>
-        <MicSettings />
-      </Card>
-
-      <Heading>call server</Heading>
-      <Card>
-        <Field
-          label="livekit sfu"
-          hint="leave blank to use whatever your homeserver advertises in .well-known, or whichever server the people already in a call are using."
-        >
-          <input
-            className="selectable"
-            value={settings.livekitUrl}
-            onChange={(e) => updateSettings({ livekitUrl: e.target.value })}
-            placeholder="https://livekit.example.org"
-            spellCheck={false}
-            style={inputStyle}
-          />
-        </Field>
       </Card>
     </>
   );
