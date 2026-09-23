@@ -8,6 +8,10 @@ export default defineConfig({
     // way to get one outside the app.
     environment: "happy-dom",
     include: ["src/**/*.test.{ts,tsx}"],
+    // Node 25+ ships its own `localStorage` global, which is `undefined` unless
+    // started with `--localstorage-file`, and it shadows happy-dom's. Switch it
+    // off so the tests see the emulated storage, as the app's webview would.
+    execArgv: ["--no-experimental-webstorage"],
     environmentOptions: {
       // A real browser treats a `DOMParser` document as inert and loads none of
       // its subresources; happy-dom tries anyway and fills the output with DNS
