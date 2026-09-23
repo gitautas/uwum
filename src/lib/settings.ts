@@ -20,8 +20,6 @@ export interface Settings {
    * quieter than this. At `GATE_OFF_DB` or below, nothing is ever cut.
    */
   inputSensitivity: number;
-  /** Overrides the LiveKit SFU discovered from `.well-known`. */
-  livekitUrl: string;
   /** Send on Enter (Discord-style) vs. Cmd+Enter. */
   sendOnEnter: boolean;
   /** Show the room info panel beside the timeline. */
@@ -72,7 +70,6 @@ export const DEFAULTS: Settings = {
   // Wide open until someone drags it up: a threshold set wrong cuts people off
   // mid-word, which is worse than the background noise it was meant to hide.
   inputSensitivity: GATE_OFF_DB,
-  livekitUrl: "",
   sendOnEnter: true,
   showInfoPanel: true,
   skinTone: 0,
@@ -146,6 +143,24 @@ export interface AudioDevice {
   label: string;
 }
 
+export interface MediaDevices {
+  inputs: AudioDevice[];
+  outputs: AudioDevice[];
+  cameras: AudioDevice[];
+  /**
+   * The `deviceId` the system default currently resolves to, so a picker left
+   * on "" can show the device that's actually in use. Null when we can't tell.
+   */
+  defaults: { input: string | null; output: string | null; camera: string | null };
+}
+
+/**
+ * Chromium lists the defaults as extra `"default"` and `"communications"`
+ * entries labelled "Default - <name>". They duplicate a real device, so they
+ * come out of the list, and are only used to work out which one is default.
+ */
+const PSEUDO_DEVICES = new Set(["default", "communications"]);
+
 /**
  * List the microphones, speakers and cameras we're allowed to see.
  *
@@ -156,15 +171,16 @@ export interface AudioDevice {
  * Camera permission is requested separately from the microphone: asking for
  * both at once means a refusal of either loses both sets of labels.
  */
-export async function listMediaDevices(): Promise<{
-  inputs: AudioDevice[];
-  outputs: AudioDevice[];
-  cameras: AudioDevice[];
-}> {
-  for (const constraint of [{ audio: true }, { video: true }]) {
+export async function listMediaDevices(): Promise<MediaDevices> {
+  // The track we get back from an unconstrained request is whatever the system
+  // default is, which is the only portable way to find out: WebKit has no
+  // "default" entry in `enumerateDevices`, and cameras have one nowhere.
+  const granted: { audio?: string; video?: string } = {};
+  for (const kind of ["audio", "video"] as const) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraint);
-      // We only wanted the permission, not the media.
+      const stream = await navigator.mediaDevices.getUserMedia({ [kind]: true });
+      granted[kind] = stream.getTracks()[0]?.getSettings().deviceId || undefined;
+      // We only wanted the permission and the device, not the media.
       stream.getTracks().forEach((track) => track.stop());
     } catch {
       // Denied or absent — we can still enumerate, just without labels.
@@ -172,17 +188,36 @@ export async function listMediaDevices(): Promise<{
   }
 
   const devices = await navigator.mediaDevices.enumerateDevices();
+  const real = (kind: MediaDeviceKind) =>
+    devices.filter((d) => d.kind === kind && !PSEUDO_DEVICES.has(d.deviceId));
   const pick = (kind: MediaDeviceKind, fallback: string) =>
-    devices
-      .filter((d) => d.kind === kind)
-      .map((d, i) => ({
-        deviceId: d.deviceId,
-        label: d.label || `${fallback} ${i + 1}`,
-      }));
+    real(kind).map((d, i) => ({
+      deviceId: d.deviceId,
+      label: d.label || `${fallback} ${i + 1}`,
+    }));
+
+  /**
+   * The real device behind `id`, which may be one of Chromium's pseudo
+   * entries: those share a `groupId` with the device they stand for.
+   */
+  const resolve = (kind: MediaDeviceKind, id: string | undefined) => {
+    if (!id) return null;
+    if (!PSEUDO_DEVICES.has(id)) return id;
+    const pseudo = devices.find((d) => d.kind === kind && d.deviceId === id);
+    return real(kind).find((d) => pseudo && d.groupId === pseudo.groupId)?.deviceId ?? null;
+  };
 
   return {
     inputs: pick("audioinput", "microphone"),
     outputs: pick("audiooutput", "speaker"),
     cameras: pick("videoinput", "camera"),
+    defaults: {
+      input: resolve("audioinput", granted.audio ?? "default"),
+      // Nothing to open for a speaker, so outside Chromium the best guess is the
+      // first one listed, which is the order the system hands them over in.
+      output:
+        resolve("audiooutput", "default") ?? real("audiooutput")[0]?.deviceId ?? null,
+      camera: resolve("videoinput", granted.video),
+    },
   };
 }

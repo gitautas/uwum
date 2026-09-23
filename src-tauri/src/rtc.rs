@@ -68,19 +68,10 @@ struct SfuResponse {
 
 /// Which LiveKit SFU to use for this room.
 ///
-/// Preference order: an explicit override the user set, then the focus already
-/// chosen by whoever is in the call (so we join *their* SFU rather than
-/// starting a second, disconnected one), then our own homeserver's advertised
-/// focus.
-async fn resolve_focus(
-    core: &MatrixCore,
-    room_id: &RoomId,
-    override_url: Option<String>,
-) -> Result<String> {
-    if let Some(url) = override_url.filter(|u| !u.trim().is_empty()) {
-        return Ok(url);
-    }
-
+/// Preference order: the focus already chosen by whoever is in the call (so we
+/// join *their* SFU rather than starting a second, disconnected one), then our
+/// own homeserver's advertised focus.
+async fn resolve_focus(core: &MatrixCore, room_id: &RoomId) -> Result<String> {
     if let Some(url) = focus_from_existing_members(core, room_id).await {
         return Ok(url);
     }
@@ -89,8 +80,8 @@ async fn resolve_focus(
         .await
         .ok_or_else(|| {
             Error::Other(
-                "no livekit server configured — set one in settings, or ask your homeserver \
-                 admin to advertise one in .well-known"
+                "no livekit server configured — ask your homeserver admin to advertise \
+                 one in .well-known"
                     .into(),
             )
         })
@@ -137,13 +128,9 @@ fn state_key(core: &MatrixCore) -> Result<CallMemberStateKey> {
 }
 
 /// Announce that we're in the call, and get credentials for the SFU.
-pub async fn join(
-    core: &MatrixCore,
-    room_id: &RoomId,
-    focus_override: Option<String>,
-) -> Result<CallCredentials> {
+pub async fn join(core: &MatrixCore, room_id: &RoomId) -> Result<CallCredentials> {
     let room = core.room(&room_id.to_owned())?;
-    let service_url = resolve_focus(core, room_id, focus_override).await?;
+    let service_url = resolve_focus(core, room_id).await?;
     // Every client uses the Matrix room ID as the LiveKit room name, which is
     // what puts us all in the same SFU room.
     let alias = room_id.to_string();
@@ -250,10 +237,12 @@ pub async fn leave(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
 
 /// Re-publish our membership so it doesn't expire mid-call.
 pub async fn refresh(core: &MatrixCore, room_id: &RoomId) -> Result<()> {
-    let focus = focus_from_existing_members(core, room_id)
+    // Checked up front so a call that emptied out while we were in it ends here,
+    // rather than `join` quietly starting a fresh one on our own SFU.
+    focus_from_existing_members(core, room_id)
         .await
         .ok_or_else(|| Error::Other("call is no longer active".into()))?;
-    join(core, room_id, Some(focus)).await.map(|_| ())
+    join(core, room_id).await.map(|_| ())
 }
 
 /// Who is currently in the call, for the participant tiles and the room list dot.

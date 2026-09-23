@@ -427,11 +427,8 @@ export const recoverWithKey = (recoveryKey: string) =>
 // calls
 // ---------------------------------------------------------------------------
 
-export const joinCall = (roomId: string, focusOverride?: string) =>
-  invoke<CallCredentials>("join_call", {
-    roomId,
-    focusOverride: focusOverride ?? null,
-  });
+export const joinCall = (roomId: string) =>
+  invoke<CallCredentials>("join_call", { roomId });
 
 export const leaveCall = (roomId: string) => invoke<void>("leave_call", { roomId });
 

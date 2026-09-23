@@ -25,10 +25,22 @@ export function Heading({ children }: { children: ReactNode }) {
   );
 }
 
-export function Card({ children, tone }: { children: ReactNode; tone?: "warning" }) {
+export function Card({
+  children,
+  tone,
+  backdrop,
+}: {
+  children: ReactNode;
+  tone?: "warning";
+  /** Something live to fill the card behind its contents, edge to edge. */
+  backdrop?: ReactNode;
+}) {
   return (
     <div
       style={{
+        // Only a card with a backdrop clips: anything else may hold a menu or
+        // popover that has to hang over the edge.
+        ...(backdrop != null && { position: "relative", overflow: "hidden" }),
         background: "var(--surface-card)",
         border: `1px solid ${tone === "warning" ? "rgba(255,194,77,.35)" : "var(--border-subtle)"}`,
         borderRadius: 20,
@@ -36,7 +48,14 @@ export function Card({ children, tone }: { children: ReactNode; tone?: "warning"
         marginBottom: 14,
       }}
     >
-      {children}
+      {backdrop == null ? (
+        children
+      ) : (
+        <>
+          {backdrop}
+          <div style={{ position: "relative" }}>{children}</div>
+        </>
+      )}
     </div>
   );
 }

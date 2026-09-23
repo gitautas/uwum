@@ -173,7 +173,7 @@ class CallController {
       }
 
       const settings = loadSettings();
-      const credentials = await ipc.joinCall(roomId, settings.livekitUrl || undefined);
+      const credentials = await ipc.joinCall(roomId);
 
       const room = new Room({
         adaptiveStream: true,
