@@ -14,6 +14,7 @@
 import {
   ConnectionState,
   DisconnectReason,
+  LocalAudioTrack,
   RemoteTrack,
   Room,
   RoomEvent,
@@ -25,6 +26,12 @@ import {
 import type { UwuError } from "./types";
 
 import * as ipc from "./ipc";
+import {
+  gateSupported,
+  gateThreshold,
+  NoiseGateProcessor,
+  type GateReading,
+} from "./noiseGate";
 import { load as loadSettings } from "./settings";
 
 export interface CallParticipantView {
@@ -54,6 +61,8 @@ export interface CallState {
   cameraEnabled: boolean;
   screenShareEnabled: boolean;
   deafened: boolean;
+  /** Whether the microphone is going through our noise gate. */
+  gateAttached: boolean;
   participants: CallParticipantView[];
   error: string | null;
 }
@@ -65,6 +74,7 @@ export const IDLE_CALL: CallState = {
   cameraEnabled: false,
   screenShareEnabled: false,
   deafened: false,
+  gateAttached: false,
   participants: [],
   error: null,
 };
@@ -125,6 +135,9 @@ class CallController {
   private audioElements = new Map<string, HTMLAudioElement>();
   private outputDeviceId = "";
   private refreshTimer: number | null = null;
+  private gate: NoiseGateProcessor | null = null;
+  private gateThreshold: number | null = null;
+  private gateOpen = false;
 
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
@@ -181,6 +194,10 @@ class CallController {
       await room.connect(credentials.livekitUrl, credentials.jwt);
       await room.localParticipant.setMicrophoneEnabled(true);
       this.outputDeviceId = settings.audioOutput;
+      // Always in the path, even wide open, so dragging the slider mid-call
+      // takes effect without swapping the track being sent.
+      this.gateThreshold = gateThreshold(settings);
+      await this.attachGate(this.gateThreshold);
 
       this.update({ status: "connected", micEnabled: true });
 
@@ -235,6 +252,51 @@ class CallController {
     await Promise.all(
       [...this.audioElements.values()].map((el) => applySink(el, deviceId)),
     );
+  }
+
+  /** Change the noise gate's threshold mid-call; `null` opens it all the way. */
+  setNoiseGate(threshold: number | null): void {
+    this.gateThreshold = threshold;
+    this.gate?.setThreshold(threshold);
+    this.syncParticipants();
+  }
+
+  /**
+   * Hear the level the call's gate sees, for the meter in settings.
+   *
+   * `null` when no gate is attached — the caller should measure the microphone
+   * itself instead.
+   */
+  onMicReading(listener: (reading: GateReading) => void): (() => void) | null {
+    return this.gate?.onReading(listener) ?? null;
+  }
+
+  private async attachGate(threshold: number | null): Promise<void> {
+    if (!this.room || !gateSupported()) return;
+    const track = this.room.localParticipant.getTrackPublication(
+      Track.Source.Microphone,
+    )?.audioTrack;
+    if (!(track instanceof LocalAudioTrack)) return;
+
+    const gate = new NoiseGateProcessor();
+    gate.setThreshold(threshold);
+    try {
+      track.setAudioContext(gate.context);
+      await track.setProcessor(gate);
+    } catch (error) {
+      // An ungated microphone is a far better outcome than a silent one.
+      console.warn("noise gate unavailable, sending the raw microphone", error);
+      await gate.destroy();
+      return;
+    }
+
+    this.gate = gate;
+    this.update({ gateAttached: true });
+    gate.onReading(({ open }) => {
+      if (open === this.gateOpen) return;
+      this.gateOpen = open;
+      this.syncParticipants();
+    });
   }
 
   async setCameraEnabled(enabled: boolean): Promise<void> {
@@ -350,7 +412,13 @@ class CallController {
         // LiveKit identities are `@user:server:DEVICEID` in MatrixRTC; the
         // Matrix user ID is everything before the device suffix.
         userId: matrixUserFromIdentity(participant.identity),
-        isSpeaking: participant.isSpeaking,
+        // Our own ring follows the gate when there is one: it's immediate, and
+        // it's the truth about what's being sent, where the SFU's speaker
+        // detection is neither.
+        isSpeaking:
+          isLocal && this.gate && this.gateThreshold !== null
+            ? this.gateOpen && this.state.micEnabled
+            : participant.isSpeaking,
         isMuted: isLocal ? !this.state.micEnabled : (audio?.isMuted ?? true),
         isLocal,
         audioLevel: participant.audioLevel ?? 0,
@@ -401,6 +469,12 @@ class CallController {
       await this.room.disconnect().catch(() => {});
       this.room = null;
     }
+
+    // After the disconnect, which stops the track that's feeding it.
+    await this.gate?.destroy();
+    this.gate = null;
+    this.gateOpen = false;
+    if (this.state.gateAttached) this.update({ gateAttached: false });
   }
 }
 

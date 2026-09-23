@@ -29,6 +29,7 @@ src/
   lib/richText.ts renders other people's HTML without trusting it
   lib/blobMedia.ts video/audio over IPC, because a custom scheme can't serve it
   lib/call.ts     LiveKit room, mic, participant state
+  lib/noiseGate.ts mic noise gate + level meter, on an AudioWorklet
   lib/presence.ts refcounts who the UI is drawing, so Rust polls no one else
   lib/update.ts   the update state machine, both the in-app and manual paths
   store/          zustand store: a projection of Rust's truth + UI state

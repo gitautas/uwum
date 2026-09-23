@@ -15,6 +15,11 @@ export interface Settings {
   audioOutput: string;
   /** `deviceId` of the camera, or "" for the system default. */
   videoInput: string;
+  /**
+   * The noise gate's threshold, in dBFS: the microphone is silenced while it's
+   * quieter than this. At `GATE_OFF_DB` or below, nothing is ever cut.
+   */
+  inputSensitivity: number;
   /** Overrides the LiveKit SFU discovered from `.well-known`. */
   livekitUrl: string;
   /** Send on Enter (Discord-style) vs. Cmd+Enter. */
@@ -49,6 +54,13 @@ export interface Settings {
   recentReactions: string[];
 }
 
+/**
+ * The bottom of the sensitivity slider, which stands in for −∞: a gate here
+ * lets everything through. A number rather than `-Infinity` because settings
+ * go through JSON, which would turn it into `null`.
+ */
+export const GATE_OFF_DB = -80;
+
 /** How many recent reactions to remember — one row of the hover bar. */
 export const MAX_RECENT_REACTIONS = 6;
 
@@ -57,6 +69,9 @@ export const DEFAULTS: Settings = {
   audioInput: "",
   audioOutput: "",
   videoInput: "",
+  // Wide open until someone drags it up: a threshold set wrong cuts people off
+  // mid-word, which is worse than the background noise it was meant to hide.
+  inputSensitivity: GATE_OFF_DB,
   livekitUrl: "",
   sendOnEnter: true,
   showInfoPanel: true,

@@ -160,3 +160,50 @@ button {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---- mic meter --------------------------------------------------------- */
+
+/*
+ * The noise gate's threshold, drawn as a slider laid over the level meter the
+ * way Discord does it: the track is invisible so the meter shows through, and
+ * the thumb is a tall marker you drag to where your background noise stops.
+ */
+.uwu-gate-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: ew-resize;
+}
+.uwu-gate-slider::-webkit-slider-runnable-track {
+  height: 100%;
+  background: transparent;
+}
+.uwu-gate-slider::-moz-range-track {
+  height: 100%;
+  background: transparent;
+}
+.uwu-gate-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 6px;
+  height: 26px;
+  margin-top: -4px;
+  border-radius: 3px;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--ink-950);
+}
+.uwu-gate-slider::-moz-range-thumb {
+  width: 6px;
+  height: 26px;
+  border: none;
+  border-radius: 3px;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--ink-950);
+}
+.uwu-gate-slider:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 2px var(--ink-950), 0 0 0 4px var(--accent-primary);
+}
