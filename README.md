@@ -65,56 +65,6 @@ sdkmanager platform-tools "platforms;android-36" "build-tools;36.0.0" "ndk;27.3.
 rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android
 ```
 
-## Mobile releases
-
-The release workflow builds a signed `.apk` and `.ipa` on every `v*` tag, and on
-demand via *Run workflow* (which attaches them as run artifacts instead of
-touching a release). Both jobs **fail without their signing secrets** rather
-than attaching something nobody can install.
-
-Their failure no longer holds up the release: the desktop bundles and the
-updater manifest publish on their own, and the run carries a warning saying the
-phone builds are absent (see *Updates* below). To get them attached, these have
-to exist in the repository's Actions secrets:
-
-| Secret | What it is |
-| --- | --- |
-| `ANDROID_KEYSTORE_BASE64` | `base64 -i release.jks \| tr -d '\n'` — the keystore itself |
-| `ANDROID_KEYSTORE_PASSWORD` | its store password |
-| `ANDROID_KEY_ALIAS` | the alias inside it |
-| `ANDROID_KEY_PASSWORD` | that key's password |
-| `IOS_CERTIFICATE_BASE64` | `base64 -i cert.p12 \| tr -d '\n'` — an Apple distribution certificate |
-| `IOS_CERTIFICATE_PASSWORD` | the password set when exporting the `.p12` |
-| `IOS_PROVISIONING_PROFILE_BASE64` | `base64 -i profile.mobileprovision \| tr -d '\n'` |
-
-`-i` and the `tr`, rather than GNU's `-w0`: macOS ships BSD `base64`, which
-rejects a bare filename and has no `-w`. It fails *quietly* in a pipeline — the
-pipe delivers nothing and `gh secret set` stores an empty secret without
-complaint, which surfaces an hour later as an unreadable keystore in CI. Check a
-secret round-trips before trusting it:
-
-```bash
-base64 -i release.jks | tr -d '\n' | base64 -d | shasum -a256   # must match
-shasum -a256 release.jks
-```
-
-A keystore, once made, cannot be replaced: Android identifies an app by its
-signing key, so a new one is a new app that cannot update the old.
-
-```bash
-keytool -genkeypair -v -keystore release.jks -alias uwum \
-  -keyalg RSA -keysize 4096 -validity 10000
-```
-
-The iOS profile is an **ad-hoc** one, matching the workflow's
-`--export-method release-testing`: it installs only on the devices listed in
-the profile, so a new phone means a new profile. For TestFlight instead, swap
-that for `app-store-connect` and use a distribution profile.
-
-Locally, neither is needed — a debug build signs itself, and
-`src-tauri/gen/android/keystore.properties` (gitignored) is read if you want to
-sign a local release build.
-
 ## Updates
 
 Every `v*` tag produces one release that serves both halves of distribution: the

@@ -193,7 +193,7 @@ jobs:
   # Both REQUIRE signing secrets and fail loudly without them, because an
   # unsigned APK installs nowhere and an unsigned IPA is not an IPA anyone can
   # use — a release that quietly attached either would be worse than one that
-  # did not build. See README for the secrets and how to make them.
+  # did not build.
   # ---------------------------------------------------------------------------
 
   android:
@@ -246,7 +246,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "${KEYSTORE_BASE64}" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 is not set — see 'Mobile releases' in README.md."
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set (also needs ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD)."
             exit 1
           fi
 
@@ -335,7 +335,7 @@ jobs:
           PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
         run: |
           if [ -z "${CERTIFICATE_BASE64}" ] || [ -z "${PROVISIONING_PROFILE_BASE64}" ]; then
-            echo "::error::iOS signing secrets are not set — see 'Mobile releases' in README.md."
+            echo "::error::iOS signing secrets are not set (IOS_CERTIFICATE_BASE64, IOS_CERTIFICATE_PASSWORD, IOS_PROVISIONING_PROFILE_BASE64)."
             exit 1
           fi
 
