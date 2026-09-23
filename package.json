@@ -16,6 +16,7 @@
     "ios": "tauri ios dev",
     "ios:build": "tauri ios build",
     "test": "vitest run",
+    "bindings": "node scripts/bindings.mjs",
     "test:watch": "vitest",
     "release:patch": "node scripts/release.mjs patch",
     "release:minor": "node scripts/release.mjs minor",

@@ -13,9 +13,13 @@ use matrix_sdk::{
 use matrix_sdk_ui::room_list_service::filters;
 use tauri::AppHandle;
 use tokio::task::JoinHandle;
+use ts_rs::TS;
 
 use crate::{
-    dto::{Diff, LatestEvent, RoomMemberDto, RoomSummary, RoomsUpdate, SpaceSummary},
+    dto::{
+        Diff, LatestEvent, RoomMemberDto, RoomMembership, RoomSummary, RoomsUpdate, SpaceSummary,
+        Verification,
+    },
     error::{Error, Result},
     events::EV_ROOMS,
     matrix::MatrixCore,
@@ -69,13 +73,13 @@ fn room_type_str(room: &Room) -> Option<String> {
     room.room_type().map(|t| t.as_str().to_owned())
 }
 
-pub fn membership_str(state: RoomState) -> &'static str {
+pub fn membership(state: RoomState) -> RoomMembership {
     match state {
-        RoomState::Joined => "joined",
-        RoomState::Left => "left",
-        RoomState::Invited => "invited",
-        RoomState::Knocked => "knocked",
-        RoomState::Banned => "banned",
+        RoomState::Joined => RoomMembership::Joined,
+        RoomState::Left => RoomMembership::Left,
+        RoomState::Invited => RoomMembership::Invited,
+        RoomState::Knocked => RoomMembership::Knocked,
+        RoomState::Banned => RoomMembership::Banned,
     }
 }
 
@@ -183,7 +187,7 @@ pub async fn summarise(room: &Room) -> Result<RoomSummary> {
         is_space: room.is_space(),
         is_utility: is_utility_room_type(room_type),
         is_muted: muted,
-        membership: membership_str(room.state()).to_owned(),
+        membership: membership(room.state()),
         notification_count,
         highlight_count,
         has_unread: notification_count > 0 || highlight_count > 0 || is_marked_unread,
@@ -341,7 +345,7 @@ async fn summarise_or_placeholder(room: &Room) -> RoomSummary {
                 is_space: false,
                 is_utility: false,
                 is_muted: false,
-                membership: membership_str(room.state()).to_owned(),
+                membership: membership(room.state()),
                 notification_count: 0,
                 highlight_count: 0,
                 has_unread: false,
@@ -420,9 +424,9 @@ pub async fn members(core: &MatrixCore, room_id: &RoomId) -> Result<Vec<RoomMemb
         // Cross-signing state is per-user and needs a store read, so a failure
         // degrades to "unknown" rather than dropping the member.
         let verification = match encryption.get_user_identity(member.user_id()).await {
-            Ok(Some(identity)) if identity.is_verified() => "verified",
-            Ok(Some(_)) => "unverified",
-            _ => "unknown",
+            Ok(Some(identity)) if identity.is_verified() => Verification::Verified,
+            Ok(Some(_)) => Verification::Unverified,
+            _ => Verification::Unknown,
         };
 
         out.push(RoomMemberDto {
@@ -440,7 +444,7 @@ pub async fn members(core: &MatrixCore, room_id: &RoomId) -> Result<Vec<RoomMemb
             },
             membership: membership_state_str(member.membership()).to_owned(),
             is_ignored: member.is_ignored(),
-            verification: verification.to_owned(),
+            verification,
         });
     }
 
@@ -512,28 +516,36 @@ async fn space_children(space: &Room) -> Vec<String> {
 // ---------------------------------------------------------------------------
 
 /// What the create-room dialog collects.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct NewRoom {
     pub name: String,
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub topic: Option<String>,
     /// Anyone can find and join it, and it gets listed in the directory.
     #[serde(default)]
+    #[ts(as = "Option<_>", optional)]
     pub is_public: bool,
     /// Alias localpart for a public room — `movies`, not `#movies:server`.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub alias: Option<String>,
     #[serde(default)]
+    #[ts(as = "Option<_>", optional)]
     pub encrypted: bool,
     #[serde(default)]
+    #[ts(as = "Option<_>", optional)]
     pub invite: Vec<String>,
     /// The space to file it under, if one was open when the user hit create.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub parent_space: Option<String>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct NewRoomResult {
     pub room_id: String,
@@ -679,7 +691,8 @@ pub async fn update(
 /// Read once when the room panel opens rather than carried on every summary:
 /// it needs the power-level state event, and the answer only matters for the
 /// room you're looking at.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct RoomPermissions {
     pub can_rename: bool,

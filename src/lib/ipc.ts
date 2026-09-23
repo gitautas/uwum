@@ -18,6 +18,7 @@ import type {
   ImagePack,
   NewRoom,
   NewRoomResult,
+  OwnPresence,
   PackEdit,
   PackRoom,
   PackTarget,
@@ -319,7 +320,7 @@ export const watchPresence = (userIds: string[]) =>
 export const getPresence = () => invoke<Presence[]>("get_presence");
 
 /** Publish our own availability — the idle timer drives this. */
-export const setOwnPresence = (presence: "online" | "unavailable" | "offline") =>
+export const setOwnPresence = (presence: OwnPresence) =>
   invoke<void>("set_own_presence", { presence });
 
 // ---------------------------------------------------------------------------

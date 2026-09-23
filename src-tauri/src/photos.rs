@@ -11,12 +11,14 @@
 //! than needing a second one that carries bytes.
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::error::{Error, Result};
 
 /// One item in the library, with a thumbnail small enough to hand to the
 /// WebView inline.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct Photo {
     pub id: String,
     /// Videos get a duration badge and a longer export.
@@ -27,7 +29,8 @@ pub struct Photo {
     pub thumb: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct RecentPhotos {
     /// False where there is no library to read — every desktop platform.
