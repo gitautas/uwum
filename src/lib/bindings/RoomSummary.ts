@@ -13,7 +13,7 @@ dmUserId: string | null, isEncrypted: boolean, isSpace: boolean,
  * A room that isn't a conversation — a pack room, or anything else with a
  * room type we don't draw. Spaces have their own flag and their own rail.
  */
-isUtility: boolean, isFavourite: boolean, isLowPriority: boolean, isMuted: boolean, membership: RoomMembership, notificationCount: number, highlightCount: number, hasUnread: boolean, isMarkedUnread: boolean, memberCount: number, latest: LatestEvent | null, 
+isUtility: boolean, isMuted: boolean, membership: RoomMembership, notificationCount: number, highlightCount: number, hasUnread: boolean, isMarkedUnread: boolean, memberCount: number, latest: LatestEvent | null, 
 /**
  * Server-side recency stamp, used to order the list.
  */
