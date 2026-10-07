@@ -12,7 +12,10 @@ import { mediaUrl } from "../lib/ipc";
 import { invalidateProfile } from "../lib/profiles";
 import {
   ACCENT_SWATCHES,
+  DEFAULTS,
+  FONT_PRESETS,
   listMediaDevices,
+  MESSAGE_FONT_SIZE_RANGE,
   type Accent,
   type AudioDevice,
   type MediaDevices,
@@ -1137,20 +1140,120 @@ function AppearanceSection() {
         </Field>
       </Card>
 
-      <Heading>composer</Heading>
       <Card>
-        <Row
-          icon="keyboard"
-          title="send with enter"
-          subtitle="off: enter makes a new line, cmd+enter sends"
+        <FontPicker
+          value={settings.fontFamily}
+          onChange={(fontFamily) => updateSettings({ fontFamily })}
+        />
+
+        <Field
+          label={`message text — ${settings.messageFontSize}px`}
+          hint="the size of messages and the composer. the rest of the app stays put."
         >
-          <Toggle
-            on={settings.sendOnEnter}
-            onToggle={(next) => updateSettings({ sendOnEnter: next })}
-          />
-        </Row>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input
+              type="range"
+              min={MESSAGE_FONT_SIZE_RANGE.min}
+              max={MESSAGE_FONT_SIZE_RANGE.max}
+              step={MESSAGE_FONT_SIZE_RANGE.step}
+              value={settings.messageFontSize}
+              onChange={(e) => updateSettings({ messageFontSize: Number(e.target.value) })}
+              style={{ flex: 1, accentColor: "var(--accent-primary)" }}
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={settings.messageFontSize === DEFAULTS.messageFontSize}
+              onClick={() => updateSettings({ messageFontSize: DEFAULTS.messageFontSize })}
+            >
+              reset
+            </Button>
+          </div>
+        </Field>
+
+        <div
+          style={{
+            background: "var(--surface-inset)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: 14,
+            padding: "12px 14px",
+            fontSize: "var(--text-message)",
+            lineHeight: 1.55,
+          }}
+        >
+          the quick brown fox jumps over the lazy dog~ ✨
+        </div>
       </Card>
     </>
+  );
+}
+
+/**
+ * The body font: a row of presets, and a box for the name of anything else
+ * installed. The box keeps its own draft so typing doesn't repaint the whole
+ * app with every half-written font name.
+ */
+function FontPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (family: string) => void;
+}) {
+  const preset = FONT_PRESETS.find((p) => p.family === value);
+  const [draft, setDraft] = useState(preset ? "" : value);
+
+  // Picking a preset clears the box; a value set elsewhere shows up in it.
+  useEffect(() => {
+    setDraft(FONT_PRESETS.some((p) => p.family === value) ? "" : value);
+  }, [value]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== value) onChange(next);
+  };
+
+  return (
+    <Field
+      label="font"
+      hint="type the name of any font installed on this machine. one that isn't falls back to nunito."
+    >
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+        {FONT_PRESETS.map((p) => {
+          const active = p.family === value;
+          return (
+            <button
+              key={p.label}
+              onClick={() => onChange(p.family)}
+              style={{
+                padding: "7px 14px",
+                borderRadius: 999,
+                cursor: "pointer",
+                fontFamily: p.family || "'Nunito Variable'",
+                fontSize: 13.5,
+                fontWeight: 700,
+                color: active ? "var(--text-on-accent)" : "var(--text-primary)",
+                background: active ? "var(--accent-primary)" : "var(--surface-inset)",
+                border: `1px solid ${active ? "var(--accent-primary)" : "var(--border-subtle)"}`,
+              }}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+        placeholder="custom font, e.g. Comic Sans MS"
+        spellCheck={false}
+        style={{ ...inputStyle, fontFamily: draft.trim() || undefined }}
+      />
+    </Field>
   );
 }
 

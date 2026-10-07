@@ -33,13 +33,12 @@ export function Composer({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [attachOpen, setAttachOpen] = useState(false);
 
-  const { draft, setDraft, clearDraft, showBanner, settings, packs } = useStore(
+  const { draft, setDraft, clearDraft, showBanner, packs } = useStore(
     useShallow((s) => ({
       draft: selectDraft(s, key),
       setDraft: s.setDraft,
       clearDraft: s.clearDraft,
       showBanner: s.showBanner,
-      settings: s.settings,
       packs: s.packs,
     })),
   );
@@ -499,11 +498,8 @@ export function Composer({
               }
             }
 
-            // Either Enter sends and Shift+Enter breaks the line, or the other
-            // way round — whichever the user picked in settings.
-            const sends = settings.sendOnEnter
-              ? e.key === "Enter" && !e.shiftKey && !e.metaKey
-              : e.key === "Enter" && (e.metaKey || e.ctrlKey);
+            // Enter sends; Shift+Enter breaks the line.
+            const sends = e.key === "Enter" && !e.shiftKey && !e.metaKey;
 
             if (sends) {
               e.preventDefault();
@@ -524,7 +520,7 @@ export function Composer({
             outline: "none",
             resize: "none",
             color: "var(--text-primary)",
-            fontSize: 14.5,
+            fontSize: "var(--text-message)",
             lineHeight: 1.5,
             padding: "9px 6px",
             maxHeight: 160,

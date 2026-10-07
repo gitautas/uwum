@@ -753,7 +753,8 @@ function ActionButton({
 
 function ContentBody({ content, emojiOnly }: { content: Content; emojiOnly: boolean }) {
   const textStyle = {
-    fontSize: emojiOnly ? 34 : 14.5,
+    // Emoji-only messages keep their ratio to the text around them.
+    fontSize: emojiOnly ? "calc(var(--text-message) * 34 / 14.5)" : "var(--text-message)",
     lineHeight: emojiOnly ? 1.2 : 1.55,
     color: "var(--text-primary)",
     maxWidth: "min(640px, 100%)",

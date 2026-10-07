@@ -374,6 +374,9 @@ export const useStore = create<State & Actions>((set, get) => ({
       const settings = { ...s.settings, ...patch };
       prefs.save(settings);
       if (patch.accent) prefs.applyAccent(patch.accent);
+      if (patch.fontFamily !== undefined || patch.messageFontSize !== undefined) {
+        prefs.applyTypography(settings);
+      }
       return { settings };
     }),
 
