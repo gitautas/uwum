@@ -349,11 +349,23 @@ export function mediaUrl(
     : `uwum://media/${encodeURIComponent(mxc)}`;
   if (!size) return base;
 
+  const { width, height } = thumbnailSize(size);
+  return `${base}?w=${width}&h=${height}`;
+}
+
+/**
+ * The thumbnail actually requested for an image shown at `size`.
+ *
+ * Exported so anything else fetching the same picture asks for the same bytes
+ * and shares the cache entry.
+ */
+export function thumbnailSize(size: { width: number; height: number }): {
+  width: number;
+  height: number;
+} {
   // Ask for 2× so the image stays sharp on retina displays.
   const scale = Math.min(window.devicePixelRatio || 1, 2);
-  const w = snapUp(size.width * scale);
-  const h = snapUp(size.height * scale);
-  return `${base}?w=${w}&h=${h}`;
+  return { width: snapUp(size.width * scale), height: snapUp(size.height * scale) };
 }
 
 /** The only thumbnail sizes we ever ask a homeserver for. */

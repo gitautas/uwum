@@ -474,12 +474,20 @@ pub async fn get_event_body(
 /// request simply never arrives and the element reports "format not supported".
 /// So media comes over IPC instead and the frontend wraps it in a `blob:` URL,
 /// which AVFoundation will load.
+///
+/// It's also how the frontend reads an image's pixels: one loaded from
+/// `uwum://` is cross-origin, so a canvas it's drawn into can't be read back.
 #[tauri::command]
 pub async fn get_media_bytes(
     state: State<'_, AppState>,
     mxc: String,
+    width: Option<u32>,
+    height: Option<u32>,
 ) -> Result<tauri::ipc::Response> {
-    let media = media::fetch(&state.core().await?.client, &mxc, None, None).await?;
+    // A size asks for the same thumbnail an `<img>` would get, so a caller that
+    // wants to look at what's already on screen hits the media cache.
+    let size = width.zip(height);
+    let media = media::fetch(&state.core().await?.client, &mxc, size, None).await?;
     Ok(tauri::ipc::Response::new(media.bytes))
 }
 

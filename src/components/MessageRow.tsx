@@ -11,6 +11,7 @@ import {
 import * as ipc from "../lib/ipc";
 import { mediaUrl } from "../lib/ipc";
 import { useMediaBlob } from "../lib/blobMedia";
+import { useIsCutout } from "../lib/cutout";
 import { saveAttachment } from "../lib/download";
 import { imageLookup, reactionImage, reactionKeyFor } from "../lib/packs";
 import { linkify, renderFormattedBody } from "../lib/richText";
@@ -954,6 +955,12 @@ function ImageBody({
     height: Math.round(height),
   });
 
+  // A transparent image is drawn the way a sticker is: on the timeline itself,
+  // not on a card. It keeps the size it would have had as a picture, so
+  // finding out doesn't shift the timeline under the reader.
+  const cutout = useIsCutout(sticker ? null : media.mxc, media.mimetype, { width, height });
+  const frameless = sticker || cutout;
+
   if (!src) return <div style={{ fontSize: 13, color: "var(--text-tertiary)" }}>{body}</div>;
 
   return (
@@ -976,10 +983,12 @@ function ImageBody({
         maxWidth: "100%",
         height: "auto",
         aspectRatio: `${Math.round(width)} / ${Math.round(height)}`,
-        objectFit: "cover",
-        borderRadius: sticker ? 8 : 16,
-        border: sticker ? "none" : "1px solid var(--border-subtle)",
-        background: "var(--surface-card)",
+        // `contain` for a cut-out: cropping one would slice off the edges of
+        // whatever was cut out.
+        objectFit: cutout ? "contain" : "cover",
+        borderRadius: frameless ? 8 : 16,
+        border: frameless ? "none" : "1px solid var(--border-subtle)",
+        background: cutout ? "transparent" : "var(--surface-card)",
       }}
     />
   );
