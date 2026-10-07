@@ -7,7 +7,7 @@ import { startNotifications } from "./lib/notify";
 import { startRinger } from "./lib/ringer";
 import { startUpdateChecks } from "./lib/update";
 import { resetPresence } from "./lib/presence";
-import { applyAccent, load as loadSettings } from "./lib/settings";
+import { applyAccent, applyTypography, load as loadSettings } from "./lib/settings";
 import type { RoomSummary } from "./lib/types";
 import { useEdgeSwipeBack, useIsMobile, useKeyboardSafeArea } from "./lib/viewport";
 import { selectActiveRoom, useStore } from "./store";
@@ -37,10 +37,12 @@ export default function App() {
     })),
   );
 
-  // Paint the saved accent before anything renders, so the app never flashes
-  // the default colour on the way to the chosen one.
+  // Paint the saved accent and fonts before anything renders, so the app never
+  // flashes the defaults on the way to the chosen ones.
   useEffect(() => {
-    applyAccent(loadSettings().accent);
+    const saved = loadSettings();
+    applyAccent(saved.accent);
+    applyTypography(saved);
   }, []);
 
   // Try to pick up where we left off before showing anything, so a returning

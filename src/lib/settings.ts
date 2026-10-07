@@ -9,6 +9,13 @@ export type Accent = "acid" | "pink" | "violet" | "cyan";
 
 export interface Settings {
   accent: Accent;
+  /**
+   * The CSS font family for body text, or "" for the design's own. Anything
+   * installed on the machine works; a name that isn't falls back to the default.
+   */
+  fontFamily: string;
+  /** Size of message text, in px. The rest of the UI keeps its own sizes. */
+  messageFontSize: number;
   /** `deviceId` of the microphone, or "" for the system default. */
   audioInput: string;
   /** `deviceId` of the speaker, or "" for the system default. */
@@ -20,8 +27,6 @@ export interface Settings {
    * quieter than this. At `GATE_OFF_DB` or below, nothing is ever cut.
    */
   inputSensitivity: number;
-  /** Send on Enter (Discord-style) vs. Cmd+Enter. */
-  sendOnEnter: boolean;
   /** Show the room info panel beside the timeline. */
   showInfoPanel: boolean;
   /** Which skin tone the emoji picker offers. 0 is the default yellow. */
@@ -64,13 +69,14 @@ export const MAX_RECENT_REACTIONS = 6;
 
 export const DEFAULTS: Settings = {
   accent: "acid",
+  fontFamily: "",
+  messageFontSize: 14.5,
   audioInput: "",
   audioOutput: "",
   videoInput: "",
   // Wide open until someone drags it up: a threshold set wrong cuts people off
   // mid-word, which is worse than the background noise it was meant to hide.
   inputSensitivity: GATE_OFF_DB,
-  sendOnEnter: true,
   showInfoPanel: true,
   skinTone: 0,
   notifyMessages: true,
@@ -83,6 +89,17 @@ export const DEFAULTS: Settings = {
   // real usage as soon as the user reacts to anything.
   recentReactions: ["💜", "😹", "🥺", "✨", "👀", "🔥"],
 };
+
+/** The range the message text size slider covers, in px. */
+export const MESSAGE_FONT_SIZE_RANGE = { min: 12, max: 22, step: 0.5 } as const;
+
+/** One-click choices for the font picker; anything else is typed in by name. */
+export const FONT_PRESETS: { label: string; family: string }[] = [
+  { label: "nunito", family: "" },
+  { label: "system", family: "system-ui" },
+  { label: "baloo", family: "'Baloo 2'" },
+  { label: "mono", family: "'JetBrains Mono Variable'" },
+];
 
 const STORAGE_KEY = "uwum:settings";
 
@@ -136,6 +153,28 @@ export function applyAccent(accent: Accent): void {
   root.style.setProperty("--accent-primary", `var(${base})`);
   root.style.setProperty("--accent-primary-hover", `var(${hover})`);
   root.style.setProperty("--accent-primary-press", `var(${press})`);
+}
+
+/** The font stack `tokens/typography.css` gives body text. */
+const DEFAULT_BODY_FONT = "'Nunito Variable', 'Nunito', ui-sans-serif, system-ui, sans-serif";
+
+/**
+ * Paint the chosen font and message size onto the document.
+ *
+ * A custom family is put in front of the design's stack rather than replacing
+ * it, so a misspelt or uninstalled font lands on Nunito instead of Times.
+ */
+export function applyTypography({
+  fontFamily,
+  messageFontSize,
+}: Pick<Settings, "fontFamily" | "messageFontSize">): void {
+  const root = document.documentElement;
+  const family = fontFamily.trim();
+  root.style.setProperty(
+    "--font-body",
+    family ? `${family}, ${DEFAULT_BODY_FONT}` : DEFAULT_BODY_FONT,
+  );
+  root.style.setProperty("--text-message", `${messageFontSize}px`);
 }
 
 export interface AudioDevice {
